@@ -1,7 +1,6 @@
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import { generateObject, generateText } from "ai";
-import { LlmProviderRegistry } from "../llm/llm-provider-registry.js";
 import type { FileUpdatedEventData, ServerEvent } from "../schemas/event-schemas.js";
 import { type CodonId, EventId } from "../types/branded-types.js";
 import type {
@@ -12,6 +11,7 @@ import type {
 } from "../types/llm-call-types.js";
 import type { SentinelConfig } from "../types/sentinel-types.js";
 import { generateId, type Logger } from "../utils.js";
+import { ProviderHealth } from "./provider-health.js";
 import { Sentinel } from "./sentinel.js";
 import { SentinelFatalError } from "./sentinel-fatal-error.js";
 
@@ -20,7 +20,12 @@ export interface SentinelManagerOptions {
   waitForHealthChecks?: boolean; // Option to wait for provider health checks
   healthCheckGracePeriodMs?: number; // Grace period to wait for health checks before loading sentinels
   enablePersistence?: boolean; // Allow disabling persistence for testing
-  providerRegistry?: LlmProviderRegistry;
+  providerRegistry?: ProviderHealth;
+  /**
+   * Replay never contacts a provider (spec 72): no health checks, so every
+   * provider stays unchecked and model-backed sentinels are skipped.
+   */
+  skipProviderHealthChecks?: boolean;
   rootDirectory?: string; // Root directory for sentinel files (default: current working directory)
   /**
    * Resolves the body a `file.updated` event described (fingerprint-events
@@ -38,7 +43,7 @@ export interface SentinelManagerOptions {
  * The SentinelManager orchestrates the lifecycle of all sentinels within a codon,
  * handling event distribution, error management, and resource cleanup. It provides:
  *
- * - **Provider Integration**: Coordinates with LlmProviderRegistry for model availability
+ * - **Provider Integration**: Coordinates with ProviderHealth for model availability
  * - **Lifecycle Management**: Loads sentinels, distributes events, handles shutdown
  * - **Error Handling**: Implements three-category fatal error framework with smart unloading
  * - **Resource Management**: Manages filesystem persistence and provider health monitoring
@@ -61,7 +66,7 @@ export class SentinelManager {
   private isDirectoryInitialized = false;
   private sentinelConfigs: Map<string, SentinelConfig> = new Map();
   private sentinelFailureCounts: Map<string, number> = new Map();
-  private providerRegistry: LlmProviderRegistry;
+  private providerRegistry: ProviderHealth;
   private healthCheckPromise?: Promise<void>;
   private providerInitPromise?: Promise<void>;
   private logger?: Logger;
@@ -82,7 +87,7 @@ export class SentinelManager {
     // Use injected registry or create a new one
     this.providerRegistry =
       options.providerRegistry ||
-      new LlmProviderRegistry({
+      new ProviderHealth({
         logger: this.logger,
         performHealthCheckOnInit: false,
       });
@@ -91,6 +96,10 @@ export class SentinelManager {
   }
 
   private async initializeProviderRegistry(waitForHealthChecks = false): Promise<void> {
+    if (this.options.skipProviderHealthChecks) {
+      this.logger?.log("Skipping provider health checks (replay: no provider calls)", "info");
+      return;
+    }
     try {
       this.logger?.log("Initializing LLM Provider Registry", "info");
 

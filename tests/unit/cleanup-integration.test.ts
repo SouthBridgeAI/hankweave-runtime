@@ -124,16 +124,17 @@ describe("Cleanup Integration Utility", () => {
       expect(fs.existsSync(testDir)).toBe(false);
     });
 
-    test("returns error without fallback when force is false", async () => {
-      // Try to clean up with invalid data source path
+    test("requires an execution path for data-source cleanup", async () => {
+      // A data source is only used to list other executions.
       const result = await executeTestCleanup({
-        dataSourcePath: "/non/existent/data/source",
+        dataSourcePath,
         skipConfirmation: true,
         force: false,
       });
 
       expect(result.success).toBe(false);
-      expect(result.errors.length).toBeGreaterThan(0);
+      expect(result.errors).toEqual(["Cleanup command failed: executionPath must be provided"]);
+      expect(fs.existsSync(testExecutionDir)).toBe(true);
     });
 
     test("handles cleanup errors gracefully", async () => {

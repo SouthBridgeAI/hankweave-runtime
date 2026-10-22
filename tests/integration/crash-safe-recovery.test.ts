@@ -9,7 +9,7 @@
  *   - state.json holds a run whose first codon is `completed` with a
  *     checkpoint reference the torn repository cannot hold, and whose second
  *     codon was `running`;
- *   - runtime.lock names a dead pid, so the run is detected as crashed.
+ *   - the ownership lease has expired; persisted state identifies the interrupted run.
  *
  * On develop this boot died with "Checkpoint  not found in repository" and
  * the process exited 1. Now it must: rebuild the repo, refuse the dangling
@@ -24,6 +24,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { ExecutionLayout } from "../../server/execution-layout.js";
 import { HankweaveRuntime } from "../../server/hankweave-runtime.js";
+import { RuntimeLock } from "../../server/runtime-lock.js";
 import { StateManager } from "../../server/state-manager.js";
 import { CodonId, RunId, SessionId } from "../../server/types/branded-types.js";
 import type * as ST from "../../server/types/state-types.js";
@@ -37,21 +38,21 @@ const codons = [
   createTestCodon({
     id: "transform",
     name: "Transform",
-    model: "sonnet",
+    model: "anthropic/claude-sonnet-4-6",
     continuationMode: "fresh",
     promptText: "t",
   }),
   createTestCodon({
     id: "catalog",
     name: "Catalog",
-    model: "sonnet",
+    model: "anthropic/claude-sonnet-4-6",
     continuationMode: "fresh",
     promptText: "c",
   }),
   createTestCodon({
     id: "emit",
     name: "Emit",
-    model: "sonnet",
+    model: "anthropic/claude-sonnet-4-6",
     continuationMode: "fresh",
     promptText: "e",
   }),
@@ -64,38 +65,41 @@ describe("Runtime: crash-safe recovery from a torn checkpoint repo", () => {
 
   const gitDir = () => path.join(hankweaveDir, "checkpoints", ".hankweavecheckpoints");
 
-  const makeRuntime = (): HankweaveRuntime =>
-    new HankweaveRuntime({
-      autostart: false,
-      headless: true,
-      port: 0,
-      cwd: execDir,
-      executionPath: execDir,
-      agentRootPath: execDir,
-      rigArchivePath: path.join(execDir, "rigArchive"),
-      dataPathInExecutionDir: execDir,
-      readOnlySourceDataPath: execDir,
-      dataHash: "test-hash",
-      isNewExecution: false,
-      isResuming: true,
-      linkType: "symlink",
-      codons,
-      socketLogFile: path.join(hankweaveDir, "logs/socket.jsonl"),
-      serverLogFile: path.join(hankweaveDir, "logs/server.log"),
-      outputDirectory: execDir,
-      sentinel: {
-        enablePersistence: false,
-        healthCheckGracePeriodMs: 0,
-        waitForAllHealthChecks: false,
+  let lock: RuntimeLock | undefined;
+  const makeRuntime = (lock: RuntimeLock): HankweaveRuntime =>
+    new HankweaveRuntime(
+      {
+        autostart: false,
+        headless: true,
+        port: 0,
+        cwd: execDir,
+        executionPath: execDir,
+        agentRootPath: execDir,
+        rigArchivePath: path.join(execDir, "rigArchive"),
+        dataPathInExecutionDir: execDir,
+        readOnlySourceDataPath: execDir,
+        dataHash: "test-hash",
+        isNewExecution: false,
+        isResuming: true,
+        linkType: "symlink",
+        codons,
+        socketLogFile: path.join(hankweaveDir, "logs/socket.jsonl"),
+        serverLogFile: path.join(hankweaveDir, "logs/server.log"),
+        outputDirectory: execDir,
+        sentinel: {
+          enablePersistence: false,
+          healthCheckGracePeriodMs: 0,
+          waitForAllHealthChecks: false,
+        },
+        logParsingInterval: 5,
+        dataHashTimeLimit: 5000,
+        toolResultTruncateLength: 2500,
+        withoutProxy: true,
+        handshakeHistoryLimit: 50,
+        version: "1.0.0",
       },
-      logParsingInterval: 5,
-      dataHashTimeLimit: 5000,
-      toolResultTruncateLength: 2500,
-      withoutProxy: true,
-      handshakeHistoryLimit: 50,
-      version: "1.0.0",
-      lockFile: path.join(hankweaveDir, "runtime.lock"),
-    });
+      lock,
+    );
 
   async function git(args: string[]): Promise<{ code: number; out: string }> {
     const proc = Bun.spawn(["git", ...args], {
@@ -197,15 +201,9 @@ describe("Runtime: crash-safe recovery from a torn checkpoint repo", () => {
   /** A well-formed checkpoint reference that no repository in these tests holds. */
   const DANGLING_SHA = "0123456789abcdef0123456789abcdef01234567";
 
-  function deadLock(runId: RunId): void {
-    fs.writeFileSync(
-      path.join(hankweaveDir, "runtime.lock"),
-      JSON.stringify({
-        pid: 999999,
-        runId,
-        lastHeartbeat: new Date(Date.now() - 600_000).toISOString(),
-      }),
-    );
+  function deadLock(_runId: RunId): void {
+    fs.mkdirSync(new ExecutionLayout(execDir).runtimeLockPath, { recursive: true });
+    fs.utimesSync(new ExecutionLayout(execDir).runtimeLockPath, new Date(0), new Date(0));
   }
 
   beforeEach(() => {
@@ -223,62 +221,78 @@ describe("Runtime: crash-safe recovery from a torn checkpoint repo", () => {
     } catch {
       // best-effort
     }
+    await lock?.release();
+    lock = undefined;
     runtime = undefined;
     fs.rmSync(execDir, { recursive: true, force: true });
   });
 
-  test("the incident: torn repo + completed codon + crashed run boots and starts fresh", async () => {
-    // 1. The repo as a kill between `git init` and the first commit leaves it.
-    expect((await git(["init", "--initial-branch=main"])).code).toBe(0);
-    expect((await git(["rev-parse", "--verify", "--quiet", "HEAD"])).code).not.toBe(0);
+  test.each([false, true])(
+    "torn repo + completed codon + crashed run recovers (metadata: %s)",
+    async (hasMetadata) => {
+      // 1. The repo as a kill between `git init` and the first commit leaves it.
+      expect((await git(["init", "--initial-branch=main"])).code).toBe(0);
+      expect((await git(["rev-parse", "--verify", "--quiet", "HEAD"])).code).not.toBe(0);
 
-    // 2. The state: transform completed (its checkpoint died with the repo),
-    //    catalog still running.
-    const runId = await writeState(async (_sm, { complete, run }) => {
-      await complete("transform", DANGLING_SHA);
-      await run("catalog");
-    });
-    deadLock(runId);
+      // 2. The state: transform completed (its checkpoint died with the repo),
+      //    catalog still running.
+      const runId = await writeState(async (_sm, { complete, run }) => {
+        await complete("transform", DANGLING_SHA);
+        await run("catalog");
+      });
+      if (hasMetadata) {
+        deadLock(runId);
+      } else {
+        // A live/reused PID is irrelevant after we acquire the execution lease.
+        // Recovery must work from state alone, with no ownership breadcrumb.
+        const statePath = path.join(hankweaveDir, "state.json");
+        const state = JSON.parse(fs.readFileSync(statePath, "utf8"));
+        state.runs[0].serverPid = process.pid;
+        fs.writeFileSync(statePath, JSON.stringify(state));
+      }
 
-    // Work the crashed run left behind — must survive the fresh-run fallback.
-    fs.writeFileSync(path.join(execDir, "notes.md"), "uncheckpointed work from the crashed run");
+      // Work the crashed run left behind — must survive the fresh-run fallback.
+      fs.writeFileSync(path.join(execDir, "notes.md"), "uncheckpointed work from the crashed run");
 
-    // 3. Boot.
-    runtime = makeRuntime();
-    const events: ServerEvent[] = [];
-    runtime.on("event", (e: ServerEvent) => events.push(e));
-    await runtime.start();
+      // 3. Boot.
+      lock = await RuntimeLock.acquire(execDir);
+      runtime = makeRuntime(lock);
+      const events: ServerEvent[] = [];
+      runtime.on("event", (e: ServerEvent) => events.push(e));
+      await runtime.start();
 
-    // The repo was rebuilt, not trusted.
-    expect((await git(["rev-parse", "--verify", "--quiet", "HEAD"])).code).toBe(0);
-    const serverLog = fs.readFileSync(path.join(hankweaveDir, "logs/server.log"), "utf-8");
-    expect(serverLog).toContain("has no resolvable HEAD; removing it and building a fresh one");
-    // The crash was detected and the thread treated as failed.
-    expect(serverLog).toContain("Execution thread failed, rolling back");
-    // The dangling reference was refused as a target, loudly.
-    expect(serverLog).toContain("has no git-confirmed completion checkpoint");
-    expect(serverLog).toContain("Recovery degraded");
-    // Nothing died: a new run exists and it is fresh.
-    const state = await readPersistedState();
-    expect(state.runs).toHaveLength(2);
-    expect(state.runs.find((r) => r.runId === runId)?.status).toBe("crashed");
-    const current = state.runs.find((r) => r.runId === state.currentRunId);
-    expect(current?.runId).not.toBe(runId);
-    expect(current?.startingConditions.type).toBe("fresh");
-    // The work tree was snapshotted before the fallback, and the file is still there.
-    const branches = (await git(["branch", "--list", "recovery/*", "--format=%(refname:short)"]))
-      .out;
-    expect(branches).toMatch(/^recovery\//);
-    const snapshotFiles = (await git(["ls-tree", "-r", "--name-only", branches.split("\n")[0]]))
-      .out;
-    expect(snapshotFiles).toContain("notes.md");
-    expect(fs.existsSync(path.join(execDir, "notes.md"))).toBe(true);
-    // And the degraded recovery was announced as an event.
-    const messages = events
-      .filter((e) => e.type === "error")
-      .map((e) => (e.data as { message: string }).message);
-    expect(messages.some((m) => m.includes("Recovery degraded"))).toBe(true);
-  }, 60_000);
+      // The repo was rebuilt, not trusted.
+      expect((await git(["rev-parse", "--verify", "--quiet", "HEAD"])).code).toBe(0);
+      const serverLog = fs.readFileSync(path.join(hankweaveDir, "logs/server.log"), "utf-8");
+      expect(serverLog).toContain("has no resolvable HEAD; removing it and building a fresh one");
+      // The crash was detected and the thread treated as failed.
+      expect(serverLog).toContain("Execution thread failed, rolling back");
+      // The dangling reference was refused as a target, loudly.
+      expect(serverLog).toContain("has no git-confirmed completion checkpoint");
+      expect(serverLog).toContain("Recovery degraded");
+      // Nothing died: a new run exists and it is fresh.
+      const state = await readPersistedState();
+      expect(state.runs).toHaveLength(2);
+      expect(state.runs.find((r) => r.runId === runId)?.status).toBe("crashed");
+      const current = state.runs.find((r) => r.runId === state.currentRunId);
+      expect(current?.runId).not.toBe(runId);
+      expect(current?.startingConditions.type).toBe("fresh");
+      // The work tree was snapshotted before the fallback, and the file is still there.
+      const branches = (await git(["branch", "--list", "recovery/*", "--format=%(refname:short)"]))
+        .out;
+      expect(branches).toMatch(/^recovery\//);
+      const snapshotFiles = (await git(["ls-tree", "-r", "--name-only", branches.split("\n")[0]]))
+        .out;
+      expect(snapshotFiles).toContain("notes.md");
+      expect(fs.existsSync(path.join(execDir, "notes.md"))).toBe(true);
+      // And the degraded recovery was announced as an event.
+      const messages = events
+        .filter((e) => e.type === "error")
+        .map((e) => (e.data as { message: string }).message);
+      expect(messages.some((m) => m.includes("Recovery degraded"))).toBe(true);
+    },
+    60_000,
+  );
 
   test("unreadable checkpoint storage stops the boot instead of starting fresh", async () => {
     const seed = await Workspace.open(new ExecutionLayout(execDir, { agentRootPath: execDir }), {
@@ -306,7 +320,8 @@ describe("Runtime: crash-safe recovery from a torn checkpoint repo", () => {
       throw new CheckpointStorageError("injected: could not enumerate checkpoints");
     };
     try {
-      runtime = makeRuntime();
+      lock = await RuntimeLock.acquire(execDir);
+      runtime = makeRuntime(lock);
       await expect(runtime.start()).rejects.toThrow(/checkpoint storage could not be read/);
     } finally {
       GitWorkspaceStorage.prototype.listSnapshots = original;
@@ -331,7 +346,8 @@ describe("Runtime: crash-safe recovery from a torn checkpoint repo", () => {
       await complete("transform", DANGLING_SHA);
     });
 
-    runtime = makeRuntime();
+    lock = await RuntimeLock.acquire(execDir);
+    runtime = makeRuntime(lock);
     const events: ServerEvent[] = [];
     runtime.on("event", (e: ServerEvent) => events.push(e));
     await runtime.start();

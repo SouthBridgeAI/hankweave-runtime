@@ -25,11 +25,30 @@ function temp(): string {
   dirs.push(dir);
   return dir;
 }
-function pack(source: string, out = path.join(temp(), "input.hank")): string {
+/**
+ * Pack in-process. `env` is applied to process.env for the call: pack checks
+ * models against Pi's catalog, so a `pi/mocklocal/…` model needs the fixture's
+ * PI_CODING_AGENT_DIR (its models.json defines the custom provider).
+ */
+function pack(
+  source: string,
+  out = path.join(temp(), "input.hank"),
+  env: Record<string, string> = {},
+): string {
   const errors: string[] = [];
-  expect(
-    runPackCommand([source, "-o", out], { out: () => {}, err: (line) => errors.push(line) }),
-  ).toBe(0);
+  const saved = Object.fromEntries(Object.keys(env).map((key) => [key, process.env[key]]));
+  Object.assign(process.env, env);
+  try {
+    expect(
+      runPackCommand([source, "-o", out], { out: () => {}, err: (line) => errors.push(line) }),
+      errors.join("\n"),
+    ).toBe(0);
+  } finally {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
   expect(fs.statSync(out).size).toBeGreaterThan(0);
   return out;
 }
@@ -92,7 +111,7 @@ describe("bundle CLI gate (no provider calls)", () => {
   it("validates from an empty receiver and reuses the content-addressed extraction on repeated invocations", async () => {
     const { source, env } = validationFixture();
     const receiver = temp();
-    const bundle = pack(source, path.join(receiver, "input.hank"));
+    const bundle = pack(source, path.join(receiver, "input.hank"), env);
     fs.rmSync(source, { recursive: true, force: true });
     const first = await cli(["input.hank", "--validate"], receiver, env);
     expect(first.output).toContain("Configuration is valid");
@@ -119,7 +138,7 @@ describe("bundle CLI gate (no provider calls)", () => {
 
   it("names a tampered prompt before validation or extraction, as a user error", async () => {
     const { source, env } = validationFixture();
-    const bundle = pack(source);
+    const bundle = pack(source, undefined, env);
     const members = readCanonicalTar(zstdDecompress(fs.readFileSync(bundle), 1024 * 1024));
     const prompt = members.find((member) => member.path === "prompt.md");
     expect(prompt).toBeDefined();
@@ -160,7 +179,7 @@ describe("bundle CLI gate (no provider calls)", () => {
       const config = JSON.parse(fs.readFileSync(file, "utf8"));
       config.requirements = { [kind]: [name] };
       fs.writeFileSync(file, JSON.stringify(config));
-      const bundle = pack(source);
+      const bundle = pack(source, undefined, env);
       const members = readCanonicalTar(zstdDecompress(fs.readFileSync(bundle), 1024 * 1024));
       const lock = JSON.parse(members[0].bytes.toString("utf8"));
       expect(lock).not.toHaveProperty("requirements");

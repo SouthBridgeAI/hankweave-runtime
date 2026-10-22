@@ -1,8 +1,8 @@
 import type { LanguageModel } from "ai";
 import type {
-  LlmProviderRegistryConfig,
+  ProviderHealthConfig,
   ProviderStatus,
-} from "../../server/llm/llm-provider-registry.js";
+} from "../../server/sentinels/provider-health.js";
 import type { Logger } from "../../server/utils.js";
 
 export interface MockModelInfo {
@@ -23,7 +23,7 @@ export class MockLlmProviderRegistry {
   private mockHealth = new Map<string, boolean>();
   private logger?: Logger;
 
-  constructor(config: LlmProviderRegistryConfig = {}) {
+  constructor(config: ProviderHealthConfig = {}) {
     this.logger = config.logger;
 
     // Initialize with some default mock models
@@ -88,8 +88,8 @@ export class MockLlmProviderRegistry {
     this.mockHealth.set(providerId, healthy);
   }
 
+  /** Registered under its full "provider/model" id only, like ProviderHealth's lookups. */
   addMockModel(model: MockModelInfo): void {
-    this.mockModels.set(model.modelId, model);
     this.mockModels.set(model.fullModelId, model);
   }
 
@@ -170,7 +170,7 @@ export class MockLlmProviderRegistry {
 
   getAvailableModels(): string[] {
     return Array.from(this.mockModels.values())
-      .filter((m) => this.isModelAvailable(m.modelId))
+      .filter((m) => this.isModelAvailable(m.fullModelId))
       .map((m) => m.fullModelId);
   }
 
@@ -250,7 +250,7 @@ export class MockLlmProviderRegistry {
     availableProviders: number;
     healthyProviders: number;
   } {
-    const totalModels = this.mockModels.size / 2; // Divided by 2 because we store each model twice
+    const totalModels = this.mockModels.size;
     const totalProviders = 4; // anthropic, openai, google, groq
     const availableProviders = Array.from(this.mockProviders.values()).filter(Boolean).length;
     const healthyProviders = Array.from(this.mockHealth.values()).filter(Boolean).length;
@@ -284,7 +284,7 @@ export class MockLlmProviderRegistry {
  * Factory function to create a mock registry for tests
  */
 export function createMockLlmProviderRegistry(
-  config: LlmProviderRegistryConfig = {},
+  config: ProviderHealthConfig = {},
 ): MockLlmProviderRegistry {
   return new MockLlmProviderRegistry(config);
 }

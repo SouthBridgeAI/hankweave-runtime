@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import fs from "node:fs";
 import path from "node:path";
+import { ExecutionLayout } from "../../server/execution-layout.js";
 
 const colors = {
   reset: "\x1b[0m",
@@ -22,7 +23,7 @@ let isCorrectDir = false;
 if (fs.existsSync("package.json")) {
   try {
     const pkg = JSON.parse(fs.readFileSync("package.json", "utf-8"));
-    isCorrectDir = pkg.name === "hankweave";
+    isCorrectDir = pkg.name === "hankweave" || pkg.name === "@southbridgeai/hankweave";
     console.log(`Package name: ${colors.yellow}${pkg.name}${colors.reset}`);
   } catch (_e) {
     console.log(`${colors.red}Error reading package.json${colors.reset}`);
@@ -31,7 +32,7 @@ if (fs.existsSync("package.json")) {
 
 if (!isCorrectDir) {
   console.log(`\n${colors.red}❌ Not in hankweave root directory!${colors.reset}`);
-  console.log(`Expected to find package.json with name: "hankweave"`);
+  console.log(`Expected to find the Hankweave package.json`);
   process.exit(1);
 }
 
@@ -70,7 +71,7 @@ const testAreaPath = path.join(cwd, "tests/test-area");
 console.log(`Test area path: ${colors.yellow}${testAreaPath}${colors.reset}`);
 
 if (fs.existsSync(testAreaPath)) {
-  console.log(`${colors.yellow}⚠ Test area exists${colors.reset}`);
+  console.log(`${colors.yellow}! Test area exists${colors.reset}`);
 
   // List contents
   const contents = fs.readdirSync(testAreaPath);
@@ -83,7 +84,7 @@ if (fs.existsSync(testAreaPath)) {
       console.log(`  ${icon} ${item}`);
     });
 
-    console.log(`\n${colors.yellow}⚠ Test area is not empty!${colors.reset}`);
+    console.log(`\n${colors.yellow}! Test area is not empty!${colors.reset}`);
     console.log(`Running 'bun run pre-test:cleanup' will DELETE everything in:`);
     console.log(`  ${colors.red}${testAreaPath}${colors.reset}`);
   } else {
@@ -106,14 +107,10 @@ console.log(
 );
 
 // Check for existing server
-const lockFilePath = path.join(testAreaPath, ".hankweave/runtime.lock");
-if (fs.existsSync(lockFilePath)) {
-  console.log(`\n${colors.red}⚠ Lock file exists!${colors.reset} Server may be running`);
-  console.log(`Lock file: ${lockFilePath}`);
-  try {
-    const pid = fs.readFileSync(lockFilePath, "utf-8").trim();
-    console.log(`PID in lock file: ${pid}`);
-  } catch {}
+const lockDir = new ExecutionLayout(testAreaPath).runtimeLockPath;
+if (fs.existsSync(lockDir)) {
+  console.log(`\n${colors.red}! Lock directory exists!${colors.reset} Server may be running`);
+  console.log(`Lock directory: ${lockDir}`);
 }
 
 // Safety warnings

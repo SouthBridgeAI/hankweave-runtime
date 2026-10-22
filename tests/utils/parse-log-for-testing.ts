@@ -1,7 +1,20 @@
 import fs from "node:fs";
-import { LlmProviderRegistry } from "../../server/llm/llm-provider-registry.js";
+import { Models, priceUsage, type UsageTokens } from "../../server/llm/index.js";
 import { logMessageSchema } from "../../server/types/claude-session-schema.js";
 import type { TokenUsage } from "../../server/types/types.js";
+
+/**
+ * Price usage from the model catalog. Claude session logs carry the bare
+ * Anthropic id; anything else is "provider/model". Unpriced models cost 0.
+ */
+function catalogCost(modelId: string, tokens: UsageTokens): number {
+  const slash = modelId.indexOf("/");
+  const record =
+    slash > 0
+      ? Models.current().get(modelId.substring(0, slash), modelId.substring(slash + 1))
+      : Models.current().get("anthropic", modelId);
+  return (record && priceUsage(record, tokens))?.cost ?? 0;
+}
 
 // Local helper for testing log parsing - replaces the removed loadCodonStateFromLog.
 // Shared by claude-log-parser.test.ts and real-claude-logs.test.ts, which used to
@@ -87,16 +100,7 @@ export function parseLogForTesting(logPath: string): {
     if (tokensWithCost._totalCost !== undefined) {
       cost = tokensWithCost._totalCost;
     } else if (modelId) {
-      // Use LLM registry to calculate cost based on model. The first getInstance()
-      // caller's config wins process-wide, so be explicit: no background health checks.
-      const registry = LlmProviderRegistry.getInstance({ performHealthCheckOnInit: false });
-      const calculatedCost = registry.calculateCost(modelId, {
-        inputTokens: tokens.inputTokens,
-        outputTokens: tokens.outputTokens,
-        cacheReadTokens: tokens.cacheReadTokens,
-        cacheCreationTokens: tokens.cacheCreationTokens,
-      });
-      cost = calculatedCost ?? 0;
+      cost = catalogCost(modelId, tokens);
     }
 
     // Clean up temporary property

@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ClientCommand } from "../../server/command-schemas.js";
+import { ExecutionLayout } from "../../server/execution-layout.js";
 import type { HankweaveState } from "../../server/types/state-types.js";
 import type {
   CodonCompletedEvent,
@@ -16,7 +17,7 @@ import type {
   ServerEvent,
 } from "../../server/types/types.js";
 import { ClientMode } from "../../server/types/types.js";
-import { WebSocket } from "../../server/utils.js";
+import { canonicalFilePath, WebSocket } from "../../server/utils.js";
 
 /**
  * Finds an available TCP port provided by the OS.
@@ -1168,7 +1169,7 @@ export async function cleanupTest(config: CleanupConfig): Promise<void> {
     console.log(`${colors.green}✓ Server shut down${colors.reset}`);
   }
 
-  // Clean up lock file only if server didn't shut down gracefully
+  // Remove any leftover lock directory after the server has stopped
   await cleanupLockFile(config.testDir, config.gracefulShutdown || false);
 
   console.log(`${colors.green}✓ Cleanup complete${colors.reset}`);
@@ -1185,16 +1186,16 @@ export async function cleanupLockFile(
   testDir: string,
   serverShutdownGracefully: boolean,
 ): Promise<void> {
-  const lockFile = path.join(testDir, ".hankweave/runtime.lock");
-  if (fs.existsSync(lockFile)) {
+  const lockDir = new ExecutionLayout(canonicalFilePath(testDir)).runtimeLockPath;
+  if (fs.existsSync(lockDir)) {
     if (serverShutdownGracefully) {
       console.log(
-        `${colors.yellow}⚠ Lock file still exists after graceful shutdown - server should have removed it${colors.reset}`,
+        `${colors.yellow}! Lock directory still exists after graceful shutdown - server should have removed it${colors.reset}`,
       );
     } else {
-      console.log(`${colors.gray}Cleaning up orphaned lock file...${colors.reset}`);
+      console.log(`${colors.gray}Cleaning up orphaned lock directory...${colors.reset}`);
     }
-    fs.unlinkSync(lockFile);
+    fs.rmdirSync(lockDir);
   }
 }
 

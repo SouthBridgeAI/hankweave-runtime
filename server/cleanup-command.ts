@@ -1,11 +1,13 @@
 import fs from "node:fs";
 import { findExecutionDirs, hashDataSource } from "./data-hasher.js";
+import { removeEmptyExecutionDirectory, removeExecutionContents } from "./execution-cleanup.js";
 import { ExecutionLayout } from "./execution-layout.js";
+import { RuntimeLock, RuntimeLockHeldError } from "./runtime-lock.js";
 import { formatSize, getDirectorySize } from "./utils.js";
 
 export interface CleanupOptions {
-  dataSourcePath?: string; // For finding by hash
-  executionPath?: string; // For direct cleanup
+  dataSourcePath?: string; // For listing other executions with the same data hash
+  executionPath: string; // Resolved cleanup target
   skipConfirmation: boolean;
 }
 
@@ -28,70 +30,35 @@ export class CleanupCommand {
     };
 
     try {
-      let dirsToRemove: string[] = [];
-
-      if (this.options.executionPath) {
-        // Direct execution path cleanup - just clean this one
-        dirsToRemove = [this.options.executionPath];
-      } else if (this.options.dataSourcePath) {
-        // Validate data source exists
-        if (!fs.existsSync(this.options.dataSourcePath)) {
-          result.errors.push(`Data source not found: ${this.options.dataSourcePath}`);
-          return result;
-        }
-
-        // Find by data hash - ONLY clean up the latest
-        console.log("Calculating data signature for cleanup...");
-        const dataHash = await hashDataSource(this.options.dataSourcePath);
-        console.log(`Data signature: ${dataHash}`);
-
-        const allDirs = await findExecutionDirs(dataHash);
-
-        if (allDirs.length === 0) {
-          console.log("No execution directories found for this data source.");
-          result.success = true;
-          return result;
-        }
-
-        // UPDATED: Only clean up the latest (first in sorted list)
-        dirsToRemove = [allDirs[0]];
-
-        // Show all directories found but note we're only cleaning the latest
-        if (allDirs.length > 1) {
-          console.log(`Found ${allDirs.length} execution directories.`);
-          console.log("Only the latest will be cleaned up.\n");
-        }
-      } else {
-        throw new Error("Either dataSourcePath or executionPath must be provided");
+      const dir = this.options.executionPath;
+      if (!dir) {
+        throw new Error("executionPath must be provided");
       }
 
       // Display what will be removed
       console.log("🧹 Hankweave Cleanup Tool\n");
       console.log("The following execution directory will be removed:\n");
 
-      for (const dir of dirsToRemove) {
-        const metaPath = new ExecutionLayout(dir).metaPath;
-        try {
-          const meta = JSON.parse(await fs.promises.readFile(metaPath, "utf-8"));
-          console.log(`📁 ${dir}`);
-          console.log(`   Created: ${meta.createdAt}`);
-          console.log(`   Last used: ${meta.lastUsed}`);
-          console.log(`   Link type: ${meta.linkType}`);
-          console.log(`   Original data: ${meta.readOnlySourceDataPath}`);
+      const metaPath = new ExecutionLayout(dir).metaPath;
+      try {
+        const meta = JSON.parse(await fs.promises.readFile(metaPath, "utf-8"));
+        console.log(`📁 ${dir}`);
+        console.log(`   Created: ${meta.createdAt}`);
+        console.log(`   Last used: ${meta.lastUsed}`);
+        console.log(`   Link type: ${meta.linkType}`);
+        console.log(`   Original data: ${meta.readOnlySourceDataPath}`);
 
-          // Calculate size
-          const size = await getDirectorySize(dir);
-          console.log(`   Size: ${formatSize(size)}`);
-        } catch {
-          console.log(`📁 ${dir} (metadata unavailable)`);
-        }
-        console.log();
+        const size = await getDirectorySize(dir);
+        console.log(`   Size: ${formatSize(size)}`);
+      } catch {
+        console.log(`📁 ${dir} (metadata unavailable)`);
       }
+      console.log();
 
       // If there are other directories, list them but note they won't be removed
       if (this.options.dataSourcePath) {
         const allDirs = await findExecutionDirs(await hashDataSource(this.options.dataSourcePath));
-        const otherDirs = allDirs.filter((d) => !dirsToRemove.includes(d));
+        const otherDirs = allDirs.filter((d) => d !== dir);
 
         if (otherDirs.length > 0) {
           console.log("Other execution directories (will NOT be removed):");
@@ -114,28 +81,32 @@ export class CleanupCommand {
       // Remove directory
       console.log("\n🗑️  Removing execution directory...\n");
 
-      for (const dir of dirsToRemove) {
+      if (!fs.existsSync(dir)) {
+        console.log(`⚠️  Directory does not exist: ${dir}`);
+      } else {
         try {
-          // Check if directory exists
-          if (!fs.existsSync(dir)) {
-            console.log(`⚠️  Directory does not exist: ${dir}`);
-            continue;
+          const lock = await RuntimeLock.acquire(dir);
+          try {
+            await removeExecutionContents(dir, lock);
+          } finally {
+            await lock.release();
           }
-
-          // Check for lock file
-          const lockFile = new ExecutionLayout(dir).lockPath;
-          if (fs.existsSync(lockFile)) {
-            result.errors.push(`Cannot remove ${dir}: Server is running`);
-            console.log(`❌ Skipped (server running): ${dir}`);
-            continue;
+          const warning = removeEmptyExecutionDirectory(dir);
+          if (warning) {
+            const message = `Execution artifacts removed. ${warning}`;
+            result.warnings.push(message);
+            console.log(`⚠️  ${message}`);
+          } else {
+            result.directoriesRemoved.push(dir);
+            console.log(`✅ Removed: ${dir}`);
           }
-
-          await fs.promises.rm(dir, { recursive: true, force: true });
-          result.directoriesRemoved.push(dir);
-          console.log(`✅ Removed: ${dir}`);
         } catch (error) {
-          result.errors.push(`Failed to remove ${dir}: ${(error as Error).message}`);
-          console.log(`❌ Failed: ${dir} - ${(error as Error).message}`);
+          const message =
+            error instanceof RuntimeLockHeldError
+              ? `Cannot remove ${dir}: ${error.message}`
+              : `Failed to remove ${dir}: ${(error as Error).message}`;
+          result.errors.push(message);
+          console.log(`❌ ${message}`);
         }
       }
 

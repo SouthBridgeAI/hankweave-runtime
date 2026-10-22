@@ -319,7 +319,7 @@ describe("codonInputs — change-aware rerun contract (spec §4.4, §7 check 3)"
 
     const p = path.join(hankDir, "hank.json");
     const raw = JSON.parse(fs.readFileSync(p, "utf8"));
-    raw.overrides = { model: "sonnet" };
+    raw.overrides = { model: "anthropic/claude-sonnet-4-6" };
     fs.writeFileSync(p, `${JSON.stringify(raw, null, 2)}\n`);
     const after = lockFor(hankDir);
 

@@ -80,7 +80,7 @@ describe("ClaudeAgentSDKManager Integration Test", () => {
       id: "test-codon-1",
       name: "First Session",
       promptText: "Say 'Hello from first session' and nothing else.",
-      model: "sonnet",
+      model: "anthropic/claude-sonnet-4-6",
       continuationMode: "fresh",
     });
 
@@ -141,7 +141,7 @@ describe("ClaudeAgentSDKManager Integration Test", () => {
       id: "test-codon-2",
       name: "Continuation Session",
       promptText: "Say 'Hello from continuation session' and nothing else.",
-      model: "sonnet",
+      model: "anthropic/claude-sonnet-4-6",
       continuationMode: "continue-previous",
     });
 
@@ -224,7 +224,7 @@ describe("ClaudeAgentSDKManager Integration Test", () => {
       id: "fresh-test-codon-1",
       name: "First Fresh Session",
       promptText: "Say 'Hello from first fresh session' and nothing else.",
-      model: "sonnet",
+      model: "anthropic/claude-sonnet-4-6",
       continuationMode: "fresh",
     });
 
@@ -275,7 +275,7 @@ describe("ClaudeAgentSDKManager Integration Test", () => {
       id: "fresh-test-codon-2",
       name: "Second Fresh Session",
       promptText: "Say 'Hello from second fresh session' and nothing else.",
-      model: "sonnet",
+      model: "anthropic/claude-sonnet-4-6",
       continuationMode: "fresh", // Fresh mode, not continuation
     });
 
@@ -409,7 +409,7 @@ describe("ClaudeAgentSDKManager Integration Test", () => {
       name: "Timeout Test",
       // Give Claude a task that will take longer than 1 second
       promptText: "Write a detailed 500-word essay about the history of computing.",
-      model: "sonnet",
+      model: "anthropic/claude-sonnet-4-6",
       continuationMode: "fresh",
     });
 

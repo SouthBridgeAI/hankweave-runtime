@@ -117,7 +117,7 @@ describe("assistant message event ordering (replay)", () => {
               id: CODON_ID,
               name: CODON_ID,
               promptText: `Replay fixture codon ${CODON_ID}`,
-              model: "haiku",
+              model: "anthropic/claude-haiku-4-5",
               continuationMode: "fresh",
               checkpointedFiles: ["*.txt"],
             },

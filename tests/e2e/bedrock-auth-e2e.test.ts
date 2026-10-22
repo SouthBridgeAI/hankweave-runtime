@@ -314,10 +314,11 @@ describe("Bedrock auth-scheme acceptance matrix", () => {
 
     expect(startupError).toBeDefined();
     // The launch helper throws ServerLaunchError with the server's stderr —
-    // the mapped guidance lives there ("Self-test failed for 1 model(s): …").
+    // the mapped guidance lives there: the harness check rejects the model
+    // before the hank parses ("Invalid model '…': No AWS credentials …").
     expect(startupError).toBeInstanceOf(ServerLaunchError);
     const stderr = (startupError as ServerLaunchError).stderr;
-    expect(stderr).toContain("Self-test failed");
+    expect(stderr).toContain("Invalid model 'amazon-bedrock/");
     expect(stderr).toContain("No AWS credentials found for Bedrock");
     expect(stderr).toContain("AWS_BEARER_TOKEN_BEDROCK");
   }, 600_000);

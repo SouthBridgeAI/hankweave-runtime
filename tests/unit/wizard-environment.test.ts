@@ -9,6 +9,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { Models } from "../../server/llm/index.js";
 import type { DemoModelChoice, EnvironmentResult } from "../../server/wizard/environment-check.js";
 import { getDemoModelChoice, validateApiCredits } from "../../server/wizard/environment-check.js";
 import { captureEnv, restoreEnv } from "../utils/env-test-helpers.js";
@@ -69,15 +70,23 @@ describe("getDemoModelChoice", () => {
   test("falls back to OpenAI (via embedded Pi) when only an OpenAI key is available", () => {
     const choice = expectChoice(makeEnv({ openai: true }));
     expect(choice.provider).toBe("openai");
-    expect(choice.modelOverride).toBe("gpt-5.2");
+    expect(choice.modelOverride).toBe("openai/gpt-5.2");
     expect(choice.providerName).toBe("OpenAI");
   });
 
   test("falls back to Google (via embedded Pi) when only a Google key is available", () => {
     const choice = expectChoice(makeEnv({ google: true }));
     expect(choice.provider).toBe("google");
-    expect(choice.modelOverride).toBe("gemini-2.5-flash");
+    expect(choice.modelOverride).toBe("google/gemini-2.5-flash");
     expect(choice.providerName).toBe("Gemini");
+  });
+
+  test("every fallback -m override is a fully qualified spelling the model check accepts", () => {
+    for (const env of [makeEnv({ openai: true }), makeEnv({ google: true })]) {
+      const override = expectChoice(env).modelOverride;
+      if (!override) throw new Error("Expected a -m override");
+      expect(Models.current().check(override).ok).toBe(true);
+    }
   });
 
   test("prefers OpenAI over Google when both keys are available (no Claude)", () => {
@@ -160,16 +169,16 @@ describe("wizard demo scenarios (end-to-end logic)", () => {
     expect(choice.modelOverride).toBeUndefined();
   });
 
-  test("OpenAI-only user: gets gpt-5.2 via -m flag", () => {
+  test("OpenAI-only user: gets openai/gpt-5.2 via -m flag", () => {
     const choice = expectChoice(makeEnv({ openai: true }));
     expect(choice.provider).toBe("openai");
-    expect(choice.modelOverride).toBe("gpt-5.2");
+    expect(choice.modelOverride).toBe("openai/gpt-5.2");
   });
 
-  test("Google-key-only user: gets gemini-2.5-flash via -m flag", () => {
+  test("Google-key-only user: gets google/gemini-2.5-flash via -m flag", () => {
     const choice = expectChoice(makeEnv({ google: true }));
     expect(choice.provider).toBe("google");
-    expect(choice.modelOverride).toBe("gemini-2.5-flash");
+    expect(choice.modelOverride).toBe("google/gemini-2.5-flash");
   });
 
   test("all providers available: prefers Claude (no override needed)", () => {

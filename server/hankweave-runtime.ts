@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { BodyResolver } from "./body-resolver.js";
@@ -14,10 +13,11 @@ import { DEFAULT_CONFIG, TIMEOUTS } from "./config.js";
 import { synthesizeMissingFailureReason } from "./error-classification.js";
 import { EventJournal } from "./event-journal.js";
 import { ExecutionLayout } from "./execution-layout.js";
+import { updateExecutionRuntimeMetadata } from "./execution-setup.js";
 import { analyzeExecutionThread, findContinuationSessionId } from "./execution-thread.js";
 import { assertGitAvailable } from "./git-support.js";
 import { describeIgnoredEntries, HankDir } from "./hank-dir.js";
-import { LlmProviderRegistry } from "./llm/llm-provider-registry.js";
+import { Models } from "./llm/index.js";
 import { ProxyRunner } from "./llm-proxy.js";
 import { Replay } from "./replay.js";
 import { RetryCoordinator } from "./retry-coordinator.js";
@@ -28,6 +28,7 @@ import {
   RollbackRejectedError,
   type RollbackTarget,
 } from "./rollback-types.js";
+import { RuntimeLock } from "./runtime-lock.js";
 // Import event types from new schema file
 import type {
   AssistantActionEvent,
@@ -59,17 +60,22 @@ import { SentinelManager } from "./sentinels/sentinel-manager.js";
 import { ShutdownWatchdog, shutdownWatchdogWanted } from "./shutdown-watchdog.js";
 
 export { RollbackMutatedWorkspaceError } from "./rollback-types.js";
+// Acquire through the same module boundary as the runtime. Bun's single-file
+// bundle can otherwise emit second copies of RuntimeLock and RuntimeLockHeldError
+// for the CLI entry point, breaking instanceof checks and contention retries.
+// Lease-loss hooks use a global registry separately.
+// Related Bun module-duplication report: https://github.com/oven-sh/bun/issues/31586
+export { RuntimeLock, RuntimeLockHeldError } from "./runtime-lock.js";
 
 import { type ArchiveResult, StateManager } from "./state-manager.js";
 import { FileEventStorage } from "./storage/file-event-storage.js";
+import { dietJournal, ensureJournalRestored } from "./storage/journal-diet.js";
 import {
-  dietJournal,
-  ensureJournalRestored,
-  isProcessOwnedLock,
-  registerProcessOwnedLock,
-  releaseProcessOwnedLock,
-} from "./storage/journal-diet.js";
-import { isTraceEnabled, registerTraceUpload } from "./trace-watcher.js";
+  isTraceEnabled,
+  type PreparedTraceUpload,
+  type PrepareTraceUpload,
+  registerTraceUpload,
+} from "./trace-watcher.js";
 import { type ServerInternalEvents, TypedEventEmitter } from "./typed-event-emitter.js";
 import { CodonId, EventId, RunId, SessionId } from "./types/branded-types.js";
 import type {
@@ -130,6 +136,11 @@ import { Workspace } from "./workspace/index.js";
  * - Cost tracking and reporting
  * - Event streaming to clients
  */
+export interface RuntimeShutdownResult {
+  exitCode: number;
+  trace?: PreparedTraceUpload;
+}
+
 export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
   private server: HankweaveServer | null = null;
   private clients: Map<string, HankweaveWebSocket<ClientData>> = new Map();
@@ -147,7 +158,6 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
   private readonly layout: ExecutionLayout;
   private stateManager: StateManager;
   private currentRunId: RunId | null = null;
-  private heartbeatInterval?: NodeJS.Timeout;
 
   // Event Journal for multi-client support
   private eventJournal: EventJournal;
@@ -178,12 +188,13 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
   private codonRunners = new Map<string, CodonRunner>();
   private serverStartTime: Date;
   private isShuttingDown = false;
+  private shutdownTask?: Promise<void>;
   private readonly watchdog = new ShutdownWatchdog({
     timeoutMs: TIMEOUTS.SHUTDOWN_WATCHDOG_MS,
     log: (message, level) => this.logger.log(message, level),
   });
   private isSkippingCodon = false;
-  private uploadTrace?: () => void;
+  private prepareTraceUpload?: PrepareTraceUpload;
 
   /**
    * Tracks whether the initial autostart has been triggered.
@@ -245,9 +256,6 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
   private sentinelConfigLoader: SentinelConfigLoader;
   private currentCodonSentinels = new Set<string>();
 
-  // LLM registry for cost calculations
-  private llmRegistry: LlmProviderRegistry;
-
   // Telemetry collector (optional - may be disabled)
   private telemetryCollector:
     | import("./telemetry/telemetry-collector.js").TelemetryCollector
@@ -258,8 +266,13 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       Partial<Pick<HankweaveConfig, keyof typeof DEFAULT_CONFIG>> & {
         codons: CodonConfig[];
       },
+    private readonly lock: RuntimeLock,
   ) {
     super();
+    if (!(lock instanceof RuntimeLock)) {
+      throw new Error("HankweaveRuntime requires a held execution lease");
+    }
+    lock.assertHeldFor(config.executionPath);
     this.config = {
       ...DEFAULT_CONFIG,
       ...config,
@@ -273,12 +286,6 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       : path.join(this.config.executionPath, this.config.serverLogFile);
     this.logger = new Logger(serverLogPath);
     this.serverStartTime = new Date();
-
-    // Make lockFile path absolute (relative to execution path)
-    // Check if lockFile is already absolute to avoid path duplication on Windows
-    this.config.lockFile = path.isAbsolute(this.config.lockFile)
-      ? this.config.lockFile
-      : path.join(this.config.executionPath, this.config.lockFile);
 
     // Initialize state manager with execution path
     this.layout = new ExecutionLayout(this.config.executionPath, {
@@ -305,11 +312,9 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       healthCheckGracePeriodMs: this.config.sentinel.healthCheckGracePeriodMs,
       waitForHealthChecks: this.config.sentinel.waitForAllHealthChecks,
       rootDirectory: this.config.executionPath, // Ensure sentinel files are in execution directory
+      skipProviderHealthChecks: Boolean(this.config.replayDir),
       resolveFileBody: (data) => this.bodyResolver.resolve(data),
     });
-
-    // Get LLM registry instance for cost calculations
-    this.llmRegistry = LlmProviderRegistry.getInstance();
 
     // Set up state manager listeners
     this.setupStateManagerListeners();
@@ -358,6 +363,11 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
               promptMetadata,
             },
           } as CodonStartedEvent);
+
+          // Journal what a reader should know about the codon's model: a
+          // provisional or user-defined record, an unknown or disputed price.
+          const modelNotice = Models.current().notice(data.codonId, entry.codon.model);
+          if (modelNotice) this.emitInfoEvent(modelNotice);
         }
       }
     });
@@ -462,220 +472,73 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
   // Initialization & Server Management
   // -------------
 
-  /**
-   * Check if a process with the given PID is running.
-   * Uses process.kill(pid, 0) which doesn't actually send a signal but checks if the process exists.
-   *
-   * @param pid - Process ID to check
-   * @returns true if the process is running, false otherwise
-   */
-  private isProcessRunning(pid: number): boolean {
-    try {
-      // Signal 0 doesn't kill the process, just checks if it exists
-      process.kill(pid, 0);
-      return true;
-    } catch (error) {
-      // Only ESRCH proves the process is gone. EPERM means it exists but
-      // belongs to another user — very much alive.
-      return (error as NodeJS.ErrnoException).code !== "ESRCH";
-    }
-  }
-
-  /** True only after THIS runtime instance wrote runtime.lock. */
-  private ownsLockFile = false;
-  /** Unique token for this instance's current lock acquisition. */
-  private lockId: string | null = null;
-  /**
-   * Set when a successor's lockId is conclusively observed in runtime.lock:
-   * this runtime is fenced — it must not reacquire the lock, and its
-   * finalize diet must not run (it would unlink the journal the successor
-   * is actively appending to).
-   */
-  private lockLostToSuccessor = false;
+  private runtimePortsPublished = false;
+  private finishShutdown!: (result: RuntimeShutdownResult) => void;
+  private readonly stopped = new Promise<RuntimeShutdownResult>((resolve) => {
+    this.finishShutdown = resolve;
+  });
 
   /**
-   * Write runtime.lock atomically (temp + rename). A plain truncating write
-   * that fails midway (ENOSPC/EIO) leaves an empty/partial lock that no
-   * later boot can parse — and fail-closed guards then refuse until someone
-   * deletes it by hand. rename() replaces the file whole or not at all.
+   * Resolves only after writers and finalization finish; the command then releases its lock.
+   * Finalization failures resolve with exit code 1. Failed or hung writer drains do
+   * not signal completion: callers must retain ownership until writers stop.
    */
-  private writeLockFileAtomic(json: string): void {
-    const tmp = `${this.config.lockFile}.tmp-${process.pid}`;
-    fs.writeFileSync(tmp, json);
-    fs.renameSync(tmp, this.config.lockFile);
-  }
-
-  /**
-   * Remove the lock file only if THIS runtime acquired it AND the file on
-   * disk is still ITS acquisition (lockId match). A runtime whose start()
-   * was refused must not unlink a sibling's lock, and a runtime that hung
-   * past staleness and was legitimately replaced must not unlink its
-   * successor's lock — either would leave a live runtime running unlocked.
-   * The registry entry is always released (by token) and the heartbeat
-   * stopped: an on-disk leftover then reads as recycled once its heartbeat
-   * lapses, instead of wedging later same-process runtimes or being kept
-   * fresh forever by an orphaned timer.
-   */
-  private removeOwnLockFile(): void {
-    if (this.heartbeatInterval) {
-      clearInterval(this.heartbeatInterval);
-      this.heartbeatInterval = undefined;
-    }
-    if (!this.ownsLockFile) return;
-    try {
-      let stillOurs = false;
-      try {
-        const current = JSON.parse(fs.readFileSync(this.config.lockFile, "utf-8")) as {
-          lockId?: unknown;
-        };
-        stillOurs = this.lockId !== null && current.lockId === this.lockId;
-      } catch {
-        // Absent, unreadable, or unparseable: not provably ours — leave it.
-      }
-      if (stillOurs) {
-        try {
-          fs.unlinkSync(this.config.lockFile);
-          this.logger.log("Lock file removed");
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-            this.logger.log(`Failed to remove lock file: ${error}`, "error");
-          }
-        }
-      } else {
-        this.logger.log("Lock file is no longer this runtime's acquisition — leaving it");
-      }
-    } finally {
-      if (this.lockId !== null) releaseProcessOwnedLock(this.lockId);
-      this.lockId = null;
-      this.ownsLockFile = false;
-    }
-  }
-
-  /**
-   * Fail fast when runtime.lock names a POSITIVELY live sibling instance —
-   * read-only, before any journal mutation (restore, append-mode open). A
-   * live pid with a fresh heartbeat always refuses: the old "recovering the
-   * same run" branch in start()'s lock check let a second instance run
-   * alongside a live first one (its own TODO admits recovery was never
-   * implemented), and two instances racing one journal is data loss. Dead
-   * and stale-heartbeat locks pass through — their removal, and the
-   * RunCrashed transitions, stay with start()'s full lock check.
-   */
-  private assertNoLiveSiblingLock(): void {
-    let raw: string;
-    try {
-      raw = fs.readFileSync(this.config.lockFile, "utf-8");
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        return; // No lock — nothing to protect against.
-      }
-      // Present but unreadable: owner liveness is unknown — fail closed
-      // before the journal-mutating steps below (a torn heartbeat rewrite
-      // must not read as "no owner").
-      throw new Error(
-        `${this.config.lockFile} exists but could not be read — refusing to touch the event ` +
-          `journal while owner liveness is unknown. Remove the lock file if this is incorrect.`,
-      );
-    }
-    let pid: number | null = null;
-    let heartbeatFresh = true;
-    try {
-      const parsed = JSON.parse(raw) as unknown;
-      // Only a POSITIVE integer is a pid — kill(-n, 0) probes a process group.
-      if (parsed && typeof parsed === "object") {
-        const info = parsed as { pid?: unknown; lastHeartbeat?: unknown };
-        if (typeof info.pid === "number" && Number.isInteger(info.pid) && info.pid > 0) {
-          pid = info.pid;
-        }
-        if (typeof info.lastHeartbeat === "string") {
-          const age = Date.now() - new Date(info.lastHeartbeat).getTime();
-          // A heartbeat we cannot parse is unknown, not stale — fail closed.
-          heartbeatFresh = Number.isNaN(age) ? true : age <= 120000;
-        }
-      } else if (typeof parsed === "number" && Number.isInteger(parsed) && parsed > 0) {
-        // Legacy bare-pid locks parse as a JSON number, not an object.
-        pid = parsed;
-      }
-    } catch {
-      const bare = Number(raw.trim());
-      if (Number.isInteger(bare) && bare > 0) pid = bare;
-    }
-    if (pid === null) {
-      // Neither JSON nor a bare pid — e.g. a torn mid-write lock. Liveness
-      // unknown: fail closed, matching start()'s own unparseable-lock refusal
-      // but BEFORE any journal mutation instead of after.
-      throw new Error(
-        `${this.config.lockFile} exists but could not be parsed — refusing to touch the event ` +
-          `journal while owner liveness is unknown. Remove the lock file if this is incorrect.`,
-      );
-    }
-    if (pid === process.pid) {
-      if (isProcessOwnedLock(this.config.lockFile)) {
-        // We wrote this lock: a live runtime in THIS process owns the
-        // directory (two in-process runtimes, as integration tests do).
-        throw new Error(
-          `Server already running in this process — refusing to touch its event journal ` +
-            `(${this.config.lockFile}).`,
-        );
-      }
-      if (!heartbeatFresh) {
-        // A dead predecessor whose pid we recycled (e.g. a restarted PID-1
-        // container), gone long enough for its heartbeat to lapse — not a
-        // sibling.
-        return;
-      }
-      // Fresh (or unknown) heartbeat on an own-pid lock we did not write:
-      // possibly a live incumbent in another pid namespace sharing this
-      // volume (both PID 1). Refuse; a real leftover goes stale in 2min.
-      throw new Error(
-        `${this.config.lockFile} names this process's pid but was not written by it, and its ` +
-          `heartbeat is not stale — refusing to touch the event journal. Retry after the ` +
-          `heartbeat lapses, or remove the lock file if no runtime is running.`,
-      );
-    }
-    if (!heartbeatFresh || !this.isProcessRunning(pid)) return;
-    throw new Error(
-      `Server already running (PID: ${pid}) — refusing to touch its event journal. ` +
-        `Remove ${this.config.lockFile} if this is incorrect.`,
-    );
+  waitForShutdown(): Promise<RuntimeShutdownResult> {
+    return this.stopped;
   }
 
   /**
    * Initialize and start the WebSocket server.
    *
-   * Steps:
-   * 1. Check for existing lock file (prevent multiple instances)
-   * 2. Create lock file with current PID
-   * 3. Initialize state manager
-   * 4. Start WebSocket server on configured port
-   * 5. Set up process termination handlers
+   * The command supplies a held lease at construction and retains it through shutdown
+   * and any subsequent execution cleanup. Startup rechecks it before any writes.
+   * 1. Initialize workspace, state, and journal
+   * 2. Start WebSocket server on configured port
+   * 3. Set up process termination handlers
    *
    * @throws Error if server is already running
    */
   async start(): Promise<number> {
+    this.lock.assertHeldFor(this.config.executionPath);
     this.logger.log(
       `Starting Hankweave Runtime v${this.config.version} in ${this.config.executionPath}`,
     );
     this.logger.log(`[DEBUG] Platform: ${process.platform}, Arch: ${process.arch}`);
     this.logger.log(`[DEBUG] Node version: ${process.version}`);
 
-    // NOTE: Proxy startup moved AFTER WebSocket server to support dynamic ports
-
-    // A live sibling instance may own this directory — including one mid-
-    // shutdown whose finalize diet is about to swap events.jsonl for the
-    // compressed pair. Touching the journal in that window buries its
-    // history (our append-mode open would create an empty journal beside the
-    // valid diet), and touching the checkpoint repo (rebuild,
-    // temp-folder sweep) races its builder. Positively-live locks fail the
-    // boot HERE, before either; dead/stale locks are recovered later by the
-    // full lock check below, which owns lock removal and RunCrashed
-    // transitions.
-    this.assertNoLiveSiblingLock();
-
-    // Direct runtime callers also need the preflight; the CLI shares this cached probe.
     assertGitAvailable("runtime startup");
+    try {
+      updateExecutionRuntimeMetadata(this.config.executionPath, undefined);
+      return await this.initialize();
+    } catch (error) {
+      this.isShuttingDown = true;
+      // Release only after partial startup's writers have drained. If cleanup
+      // itself fails, retain the lease while this process is alive rather than
+      // expose a directory that could still be receiving writes.
+      try {
+        this.server?.stop();
+        this.proxyRunner?.stop();
+        // Recovery with autostart may already have started a codon before the
+        // server bound. Stop the agent before the journal closes and the lease
+        // is released; no exit checkpoint, the tree is not trustworthy mid-startup.
+        await this.stopCurrentCodon();
+        this.cleanupCurrentCodon();
+        await this.sentinelManager.shutdown();
+        await this.stateManager.waitForPendingTransitions();
+        await this.eventJournalAppendQueue;
+        await this.eventJournal.close();
+        this.clearRuntimeMetadata();
+      } catch (cleanupError) {
+        // Do not return to the command's finally while writers may still be alive.
+        console.error(`Fatal: startup cleanup failed: ${cleanupError}`);
+        process.exit(1);
+      }
+      throw error;
+    }
+  }
 
-    // Open only after the sibling check: storage initialization can rebuild
+  private async initialize(): Promise<number> {
+    // Open only after acquiring lifetime ownership: storage initialization can rebuild
     // repositories and remove stale locks. Publish ready capabilities before
     // loading state or detecting crashed runs.
     const workspace = await Workspace.open(this.layout, { logger: this.logger });
@@ -715,93 +578,63 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     // Set up event routing to sentinels
     this.setupSentinelEventRouting();
 
-    // Check for existing lock file
-    if (fs.existsSync(this.config.lockFile)) {
-      const lockData = fs.readFileSync(this.config.lockFile, "utf-8");
+    await this.reconcileInterruptedRuns();
 
-      // Parse lock file for enhanced data
-      try {
-        const parsedLock = JSON.parse(lockData) as unknown;
-        // A legacy bare-pid lock parses as a JSON number, not an object —
-        // coerce it so a DEAD legacy lock is recovered below instead of
-        // process.kill(undefined) reading as alive. Anything without an
-        // integer pid throws into the old-format refusal.
-        const lockInfo = (
-          parsedLock && typeof parsedLock === "object" ? parsedLock : { pid: parsedLock }
-        ) as { pid?: unknown; lastHeartbeat?: unknown; runId?: string };
-        if (
-          typeof lockInfo.pid !== "number" ||
-          !Number.isInteger(lockInfo.pid) ||
-          lockInfo.pid <= 0 // kill(-n, 0) probes a process GROUP, not a pid
-        ) {
-          throw new Error(`lock file has no usable pid`);
-        }
-        const heartbeatAge = Date.now() - new Date(String(lockInfo.lastHeartbeat)).getTime();
-
-        // A lock naming OUR pid that this process did not write, whose
-        // heartbeat has lapsed, is a dead predecessor's leftover on a
-        // recycled pid (restarted PID-1 container) — kill(0) on ourselves
-        // would read it as alive and this check would refuse forever. Route
-        // it through the dead-process recovery below. A fresh-or-unknown
-        // heartbeat does NOT qualify: it may be a live incumbent in another
-        // pid namespace sharing the volume.
-        const ownRecycled =
-          lockInfo.pid === process.pid &&
-          !isProcessOwnedLock(this.config.lockFile) &&
-          heartbeatAge > 120000;
-
-        // First check if the process is actually running
-        const processRunning = !ownRecycled && this.isProcessRunning(lockInfo.pid);
-
-        if (!processRunning) {
-          // Process is not running - this is a crash regardless of heartbeat age
-          this.logger.log(`Found lock file from dead process (PID: ${lockInfo.pid}), removing...`);
-          fs.unlinkSync(this.config.lockFile);
-
-          // Mark the run as crashed
-          if (lockInfo.runId) {
-            this.stateManager.transition({
-              type: "RunCrashed",
-              data: {
-                runId: RunId(lockInfo.runId),
-                detectedAt: new Date().toISOString(),
-                lastCodonStatus: "unknown" as CodonStatus,
-              },
-            });
-          }
-        } else if (heartbeatAge > 120000) {
-          // Process is running but heartbeat is stale (> 2 minutes)
-          this.logger.log(`Found stale lock file (heartbeat age: ${heartbeatAge}ms), removing...`);
-          fs.unlinkSync(this.config.lockFile);
-
-          // Mark the run as crashed
-          if (lockInfo.runId) {
-            this.stateManager.transition({
-              type: "RunCrashed",
-              data: {
-                runId: RunId(lockInfo.runId),
-                detectedAt: new Date().toISOString(),
-                lastCodonStatus: "unknown" as CodonStatus,
-              },
-            });
-          }
-        } else {
-          // Process is running and heartbeat is recent: another live instance
-          // owns this directory. The old "recovering the same run" branch
-          // (matching persisted currentRunId) never actually recovered — its
-          // TODO admitted it — and simply let a second instance run beside a
-          // live first one, racing the journal, state.json, and the lock.
-          // A live owner always refuses, whatever run it is on.
-          throw new Error(`Server already running (PID: ${lockInfo.pid}, Run: ${lockInfo.runId})`);
-        }
-      } catch (_e) {
-        // Old format lock file - just PID
-        throw new Error(
-          `Server already running (PID: ${lockData}). Remove ${this.config.lockFile} if this is incorrect.`,
-        );
-      }
+    // Check trace configuration asynchronously so the ownership heartbeat keeps running.
+    if (isTraceEnabled()) {
+      this.prepareTraceUpload = await registerTraceUpload(this.config.executionPath, this.logger);
     }
 
+    await this.establishStartupRun();
+
+    this.startWebSocketServer();
+
+    const actualProxyPort = this.startProxyServer();
+
+    // Publish the actual ports for --attach
+    this.publishRuntimePorts(this.config.port, actualProxyPort);
+
+    // Prominent port display
+    console.log(`\n${"═".repeat(50)}`);
+    console.log(`  Hankweave Server Started`);
+    console.log(`  WebSocket: ws://localhost:${this.config.port}`);
+    if (actualProxyPort !== undefined) {
+      console.log(`  Proxy:     http://localhost:${actualProxyPort}`);
+    }
+    console.log(`${"═".repeat(50)}\n`);
+
+    this.registerTerminationHandlers();
+
+    // Return actual port for callers
+    return this.config.port;
+  }
+
+  private async reconcileInterruptedRuns(): Promise<void> {
+    // We hold the execution lease and have not started a run yet. Any persisted
+    // running run belongs to a predecessor, even if its PID is still alive.
+    for (const run of this.stateManager.getState().runs) {
+      if (run.status !== "running") continue;
+      this.stateManager.transition({
+        type: "RunCrashed",
+        data: {
+          runId: run.runId,
+          detectedAt: new Date().toISOString(),
+          lastCodonStatus: run.codons.at(-1)?.status ?? ("unknown" as CodonStatus),
+        },
+      });
+    }
+    await this.stateManager.waitForPendingTransitions();
+  }
+
+  private clearRuntimeMetadata(): void {
+    if (this.runtimePortsPublished) {
+      updateExecutionRuntimeMetadata(this.config.executionPath, undefined);
+      this.runtimePortsPublished = false;
+    }
+    this.logger.disableFileLogging();
+  }
+
+  private async establishStartupRun(): Promise<void> {
     // Recovery decisions below rest on the thread's git validation. The
     // storage was proven readable by stateManager.initialize(), so this
     // strict build cannot mistake "unreadable" for "no checkpoints".
@@ -841,7 +674,9 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       // untouched; pick a continuation seed or start fresh from history.
       await this.establishRunFromHistory();
     }
+  }
 
+  private startWebSocketServer(): void {
     // Start WebSocket server FIRST (to get dynamic port before proxy starts)
     this.logger.log(`[DEBUG] About to start WebSocket server on port ${this.config.port}...`);
     try {
@@ -902,7 +737,9 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       }
       throw error;
     }
+  }
 
+  private startProxyServer(): number | undefined {
     // NOW start proxy server AFTER we know the actual WebSocket port
     let actualProxyPort: number | undefined;
     if (!this.config.withoutProxy) {
@@ -921,15 +758,8 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
         this.logger.log(`Proxy server started on port ${actualProxyPort}`);
       } catch (error) {
         // If preferred port fails, try dynamic allocation
-        // Check for EADDRINUSE via code property or error message
-        const isPortError =
-          error instanceof Error &&
-          (("code" in error && (error as NodeJS.ErrnoException).code === "EADDRINUSE") ||
-            error.message.toLowerCase().includes("address") ||
-            error.message.toLowerCase().includes("port") ||
-            error.message.toLowerCase().includes("eaddrinuse"));
-
-        if (isPortError) {
+        // Check for EADDRINUSE via code property or error message.
+        if (this.isProxyPortError(error)) {
           this.logger.log(`Port ${preferredProxyPort} unavailable, using dynamic port for proxy`);
           this.proxyRunner = new ProxyRunner(
             "passthrough",
@@ -949,19 +779,20 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     } else {
       this.logger.log("Proxy server disabled");
     }
+    return actualProxyPort;
+  }
 
-    // Update lock file with actual ports
-    this.updateLockFileWithPort(this.config.port, actualProxyPort);
+  private isProxyPortError(error: unknown): boolean {
+    return (
+      error instanceof Error &&
+      (("code" in error && (error as NodeJS.ErrnoException).code === "EADDRINUSE") ||
+        error.message.toLowerCase().includes("address") ||
+        error.message.toLowerCase().includes("port") ||
+        error.message.toLowerCase().includes("eaddrinuse"))
+    );
+  }
 
-    // Prominent port display
-    console.log(`\n${"═".repeat(50)}`);
-    console.log(`  Hankweave Server Started`);
-    console.log(`  WebSocket: ws://localhost:${this.config.port}`);
-    if (actualProxyPort !== undefined) {
-      console.log(`  Proxy:     http://localhost:${actualProxyPort}`);
-    }
-    console.log(`${"═".repeat(50)}\n`);
-
+  private registerTerminationHandlers(): void {
     // Handle process termination — second signal escalates to force shutdown
     process.on("SIGINT", () => {
       if (this.isShuttingDown) {
@@ -1003,38 +834,18 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       }
       this.shutdown("unhandledRejection");
     });
-
-    // Register post-run trace upload if any platform is configured.
-    // Stores the upload function and calls it explicitly in shutdown() so the
-    // upload runs before process.exit() rather than blocking in an exit handler.
-    if (isTraceEnabled()) {
-      this.uploadTrace = registerTraceUpload(this.config.executionPath, this.logger);
-    }
-
-    // Return actual port for callers
-    return this.config.port;
   }
 
   /**
-   * Update the lock file with the actual server port.
+   * Record the actual server ports in execution metadata.
    * Called after WebSocket server binds when using dynamic ports.
    */
-  private updateLockFileWithPort(actualPort: number, proxyPort?: number): void {
-    try {
-      if (fs.existsSync(this.config.lockFile)) {
-        const lockData = JSON.parse(fs.readFileSync(this.config.lockFile, "utf-8"));
-        lockData.port = actualPort;
-        if (proxyPort !== undefined) {
-          lockData.proxyPort = proxyPort;
-        }
-        this.writeLockFileAtomic(JSON.stringify(lockData));
-        this.logger.log(
-          `Lock file updated with port ${actualPort}${proxyPort !== undefined ? `, proxy ${proxyPort}` : ""}`,
-        );
-      }
-    } catch (error) {
-      this.logger.log(`Failed to update lock file with port: ${error}`, "error");
-    }
+  private publishRuntimePorts(actualPort: number, proxyPort?: number): void {
+    updateExecutionRuntimeMetadata(this.config.executionPath, { port: actualPort, proxyPort });
+    this.runtimePortsPublished = true;
+    this.logger.log(
+      `Runtime discovery updated with port ${actualPort}${proxyPort !== undefined ? `, proxy ${proxyPort}` : ""}`,
+    );
   }
 
   // -------------
@@ -1669,19 +1480,9 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
   private async startNewRun(
     startingConditions?: import("./types/state-types.js").StartingConditions,
   ): Promise<void> {
-    if (this.lockLostToSuccessor) {
-      // Fenced BEFORE any state mutation (RunStarted, currentRunId, body
-      // resolver) — a successor owns this directory's state now, and the
-      // later lock-reacquisition refusal alone would fire only after this
-      // method had already queued transitions into the successor's state.
-      throw new Error(
-        "This runtime lost its lock to a successor instance — refusing to start a new run. " +
-          "Shut this instance down.",
-      );
-    }
     if (this.isShuttingDown) {
       // A rollback-continuation (or any other caller) racing shutdown must
-      // not rewrite runtime.lock and restart the heartbeat during teardown.
+      // not publish runtime metadata during teardown.
       throw new Error("Shutdown in progress — refusing to start a new run.");
     }
     const runId = RunId(`${Date.now()}-${Math.random().toString(36).substring(2, 7)}`);
@@ -1693,17 +1494,8 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     // Create run folder
     await fs.promises.mkdir(runFolder, { recursive: true });
 
-    // The mkdir above yields to the event loop, where a heartbeat tick may
-    // have fenced this runtime OR a shutdown may have begun — re-check both
-    // before the first STATE mutation, or RunStarted/currentRunId (and the
-    // lock rewrite + heartbeat restart further down) would land in the
-    // successor's state or recreate the lock after teardown.
-    if (this.lockLostToSuccessor) {
-      throw new Error(
-        "This runtime lost its lock to a successor instance — refusing to start a new run. " +
-          "Shut this instance down.",
-      );
-    }
+    // mkdir yields: shutdown may have started meanwhile.
+    // Recheck before scheduling the first state mutation.
     if (this.isShuttingDown) {
       throw new Error("Shutdown in progress — refusing to start a new run.");
     }
@@ -1745,158 +1537,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       this.telemetryCollector.setRunId(runId);
     }
 
-    // Update lock file with runId and heartbeat
-    interface LockFile {
-      pid: number;
-      /**
-       * Unique per lock acquisition. Pid + "acquired once" is not identity:
-       * after >120s of missed heartbeats a successor may legitimately
-       * replace this lock, and teardown/heartbeat must then recognize the
-       * file is no longer theirs instead of unlinking or refreshing it.
-       */
-      lockId: string;
-      runId: string;
-      startTime: string;
-      lastHeartbeat: string;
-      port?: number; // Optional for backward compatibility with old lock files
-    }
-
-    // The new token is committed to this.lockId only AFTER the write
-    // succeeds: assigning first would leave the instance holding token B
-    // while disk and registry still carry token A on an ENOSPC/EACCES
-    // failure — teardown would then release B (a no-op), skip the
-    // still-owned A lock, and leak A's registry entry.
-    const newLockId = randomUUID();
-    const lockData: LockFile = {
-      pid: process.pid,
-      lockId: newLockId,
-      runId,
-      startTime: new Date().toISOString(),
-      lastHeartbeat: new Date().toISOString(),
-      port: this.config.port, // NOTE: May be 0 initially if using dynamic port; updated after server binds
-    };
-
-    if (this.lockLostToSuccessor) {
-      // A successor conclusively took this directory over; reacquiring would
-      // stomp its lock and race its journal. This runtime is fenced.
-      throw new Error(
-        "This runtime lost its lock to a successor instance — refusing to reacquire " +
-          `${this.config.lockFile}. Shut this instance down.`,
-      );
-    }
-    const lockDir = path.dirname(this.config.lockFile);
-    if (!fs.existsSync(lockDir)) {
-      fs.mkdirSync(lockDir, { recursive: true });
-    }
-    this.writeLockFileAtomic(JSON.stringify(lockData));
-    // Mark the lock as held by THIS runtime and process so the ownership
-    // guards can tell a live in-process sibling from a recycled-pid
-    // leftover, and so teardown only ever removes a lock it acquired. A
-    // re-acquisition releases the previous token first.
-    if (this.lockId !== null) releaseProcessOwnedLock(this.lockId);
-    registerProcessOwnedLock(this.config.lockFile, newLockId);
-    this.lockId = newLockId;
-    this.ownsLockFile = true;
-
-    // (Re)start the heartbeat — clearing any previous interval, or a
-    // re-acquisition would leak a timer that shutdown can no longer stop.
-    if (this.heartbeatInterval) clearInterval(this.heartbeatInterval);
-    this.heartbeatInterval = setInterval(() => {
-      this.updateHeartbeat();
-    }, 30000); // Every 30 seconds
-
     this.logger.log(`Started new run: ${runId}`);
-  }
-
-  /**
-   * Update heartbeat in lock file
-   */
-  private updateHeartbeat(): void {
-    try {
-      // Only ENOENT is "the lock is gone". existsSync also returns false on
-      // EACCES/EIO, and fencing on a transient filesystem error would
-      // permanently stop a healthy runtime's heartbeat — whose untouched
-      // lock then goes stale and invites a takeover beside it.
-      let lockPresent: boolean;
-      try {
-        fs.statSync(this.config.lockFile);
-        lockPresent = true;
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-          this.logger.log(`Heartbeat: could not stat lock file (transient?): ${error}`, "error");
-          return; // Unknown state — neither refresh nor fence this tick.
-        }
-        lockPresent = false;
-      }
-      if (!lockPresent) {
-        if (this.ownsLockFile) {
-          // We believe we hold the lock but the file is GONE: a successor
-          // took over and already finished (removing its own lock), or an
-          // operator deleted ours. Either way this runtime conclusively
-          // lost the directory — the ABA case a foreign-token check alone
-          // misses. Fence, same as an observed takeover.
-          this.logger.log(
-            "runtime.lock disappeared while this runtime believed it held it — fencing " +
-              "(no lock reacquisition, no finalize diet)",
-            "error",
-          );
-          this.fenceAfterLostLock();
-        }
-        return;
-      }
-      {
-        const lock = JSON.parse(fs.readFileSync(this.config.lockFile, "utf-8"));
-        // A lock that is not THIS acquisition belongs to a successor that
-        // legitimately replaced us after our heartbeat lapsed. Our own
-        // acquisition always carries a string UUID, so an ABSENT lockId is
-        // foreign too (an older runtime's lock, or the diet CLI's
-        // maintenance claim). Refreshing either would keep alive a lock we
-        // no longer own; stop instead.
-        if ((lock as { lockId?: unknown }).lockId !== this.lockId) {
-          this.logger.log(
-            "runtime.lock was taken over by another instance — stopping heartbeat and " +
-              "fencing this runtime (no lock reacquisition, no finalize diet)",
-            "error",
-          );
-          this.fenceAfterLostLock();
-          return;
-        }
-        lock.lastHeartbeat = new Date().toISOString();
-        this.writeLockFileAtomic(JSON.stringify(lock));
-      }
-    } catch (error) {
-      this.logger.log(`Failed to update heartbeat: ${error}`, "error");
-    }
-  }
-
-  /**
-   * Common fencing after conclusively losing the lock (foreign token or
-   * vanished file). Fencing is not bookkeeping alone: a displaced runtime
-   * that keeps serving commands and starting codons is ongoing split-brain
-   * against the successor's journal, state, and workspace — so this also
-   * INITIATES shutdown. shutdown() flips isShuttingDown synchronously,
-   * which closes the autostart/command gates; the finalize diet is
-   * separately guarded by the fresh lock-ownership check, and teardown by
-   * the lockId match. exitProcess=true, exit code 1: a fenced runtime has
-   * no legitimate work left, the TUI holds raw stdin that would keep a
-   * "drained" process alive forever, and exiting arms the shutdown
-   * watchdog so a wedged cleanup cannot leave a fenced server serving. A
-   * displaced runtime is a dead runtime.
-   */
-  private fenceAfterLostLock(): void {
-    this.lockLostToSuccessor = true;
-    if (this.heartbeatInterval) {
-      clearInterval(this.heartbeatInterval);
-      this.heartbeatInterval = undefined;
-    }
-    if (this.lockId !== null) releaseProcessOwnedLock(this.lockId);
-    this.lockId = null;
-    this.ownsLockFile = false;
-    if (!this.isShuttingDown) {
-      void this.shutdown("lock lost to successor instance — fencing", true, 1).catch((error) => {
-        this.logger.log(`Fencing shutdown failed: ${error}`, "error");
-      });
-    }
   }
 
   // -------------
@@ -2165,7 +1806,7 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
         executionPath: this.config.executionPath,
         agentRootPath: this.config.agentRootPath,
         logger: this.logger,
-        llmRegistry: this.llmRegistry,
+        models: Models.current(),
         logParsingInterval: this.config.logParsingInterval,
         anthropicBaseUrl: this.proxyRunner?.proxyUrl,
         logPath,
@@ -4890,19 +4531,26 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
    * 2. Kill Claude process if running
    * 3. Wait for pending transitions
    * 4. Create final checkpoint if needed
-   * 5. Exit process with appropriate code
+   * 5. Return the exit code and prepared trace to the command via waitForShutdown()
    *
    * @param reason - Reason for shutdown (for logging)
-   * @param exitProcess - Whether to call process.exit() (default: true, false for tests)
+   * @param exitProcess - Enable the fatal timeout backstop (false for embedded callers/tests).
    * @param exitCode - Optional exit code override. If undefined, determined from run status
    */
   async shutdown(reason: string, exitProcess = true, exitCode?: number): Promise<void> {
-    // Second call during shutdown escalates to force shutdown
     if (this.isShuttingDown) {
-      this.logger.log(`Shutdown already in progress, escalating to force shutdown: ${reason}`);
       await this.forceShutdown(reason, exitProcess);
       return;
     }
+    this.shutdownTask = this.shutdownRuntime(reason, exitProcess, exitCode);
+    return this.shutdownTask;
+  }
+
+  private async shutdownRuntime(
+    reason: string,
+    exitProcess: boolean,
+    exitCode?: number,
+  ): Promise<void> {
     this.logger.log(`Shutting down server: ${reason}`);
     this.isShuttingDown = true;
 
@@ -4930,15 +4578,85 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       },
     } as InfoEvent);
 
-    // Kill any running process — this now properly waits for the child to die
-    // (up to PROCESS_KILL_GRACE_MS with SIGKILL escalation for shims)
-    if (this.currentCodon) {
-      const runner = this.codonRunners.get(this.currentCodon.codonId);
-      if (runner) {
-        this.logger.log("Killing current codon runner for shutdown");
-        await runner.kill("SIGTERM");
-      }
+    await this.stopAgentsForShutdown(reason);
+
+    const runForTelemetry = this.finalizeRunForShutdown(reason);
+
+    // Wait for any pending state transitions
+    await this.stateManager.waitForPendingTransitions();
+
+    // Ensure file-backed event journal writes are fully drained before shutdown
+    // returns. Tests may replace or delete the execution directory immediately
+    // after this method resolves.
+    await this.eventJournalAppendQueue;
+
+    await this.flushShutdownTelemetry(runForTelemetry);
+
+    // Keep lifetime exclusion and diagnostics through journal finalization.
+
+    this.closeConnectionsForShutdown();
+
+    const journalClosed = await this.closeJournalForShutdown();
+
+    // Capture the uncompressed journal and logs while they are stable. Uploading
+    // uses only this snapshot and cannot race a resumed runtime or cleanup.
+    if (!journalClosed) {
+      // Never return to the command's finally with undrained writers.
+      if (shutdownWatchdogWanted(exitProcess, reason)) process.exit(1);
+      throw new Error("Journal failed to close during shutdown");
     }
+    await this.finishDrainedShutdown(async () => {
+      let trace: PreparedTraceUpload | undefined;
+      try {
+        try {
+          trace = await this.prepareTraceUpload?.();
+        } catch (error) {
+          this.logger.log(`Trace snapshot failed: ${error}`, "error");
+        }
+        await this.finalizeJournalForShutdown(runForTelemetry, reason, exitCode);
+        const finalExitCode = this.computeExitCode(reason, exitCode, runForTelemetry);
+        this.logger.log(`Shutdown: ${reason} (exit code: ${finalExitCode})`);
+        this.clearRuntimeMetadata();
+        return { exitCode: finalExitCode, trace };
+      } catch (error) {
+        await trace?.dispose();
+        throw error;
+      }
+    });
+  }
+
+  /** Only call after writers have drained and the journal has closed. */
+  private async finishDrainedShutdown(
+    finalize: () => Promise<RuntimeShutdownResult>,
+  ): Promise<void> {
+    let result: RuntimeShutdownResult = { exitCode: 1 };
+    try {
+      result = await finalize();
+    } finally {
+      // Even failed metadata cleanup must stop file logging before the command
+      // can release ownership. Finalization errors still propagate to shutdown's
+      // caller, but must not strand independent waitForShutdown() callers.
+      this.logger.disableFileLogging();
+      this.watchdog.clear();
+      this.finishShutdown(result);
+    }
+  }
+
+  /**
+   * Kill the running agent and wait for it to die (up to PROCESS_KILL_GRACE_MS
+   * with SIGKILL escalation for shims). Shared by shutdown and startup failure.
+   */
+  private async stopCurrentCodon(): Promise<void> {
+    if (!this.currentCodon) return;
+    const runner = this.codonRunners.get(this.currentCodon.codonId);
+    if (runner) {
+      this.logger.log("Killing current codon runner for shutdown");
+      await runner.kill("SIGTERM");
+    }
+  }
+
+  private async stopAgentsForShutdown(reason: string): Promise<void> {
+    await this.stopCurrentCodon();
 
     // Create exit checkpoint if not shutting down normally (all codons completed)
     if (reason !== "all codons completed" && this.currentCodon) {
@@ -4964,7 +4682,9 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       await this.sentinelManager.shutdown();
       this.logger.log("Sentinel manager shutdown complete", "info");
     }
+  }
 
+  private finalizeRunForShutdown(reason: string): Run | null {
     // Capture the current run BEFORE transitioning to completed/failed,
     // because RunCompleted/RunFailed clears currentRunId in state, which
     // would make getCurrentRun() return null when telemetry needs it.
@@ -4998,15 +4718,10 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
         data: { runId: this.currentRunId },
       });
     }
+    return runForTelemetry;
+  }
 
-    // Wait for any pending state transitions
-    await this.stateManager.waitForPendingTransitions();
-
-    // Ensure file-backed event journal writes are fully drained before shutdown
-    // returns. Tests may replace or delete the execution directory immediately
-    // after this method resolves.
-    await this.eventJournalAppendQueue;
-
+  private async flushShutdownTelemetry(runForTelemetry: Run | null): Promise<void> {
     // Send telemetry and flush Sentry before closing connections
     if (this.telemetryCollector) {
       try {
@@ -5034,13 +4749,9 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     } catch {
       // Silent fail
     }
+  }
 
-    // Clear heartbeat interval
-    if (this.heartbeatInterval) {
-      clearInterval(this.heartbeatInterval);
-      this.heartbeatInterval = undefined;
-    }
-
+  private closeConnectionsForShutdown(): void {
     // Close all connected clients
     for (const [clientId, client] of this.clients) {
       try {
@@ -5061,7 +4772,9 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       this.proxyRunner.stop();
       this.proxyRunner = null;
     }
+  }
 
+  private async closeJournalForShutdown(): Promise<boolean> {
     // Close event journal: drains pending writes, flushes the meta sidecar,
     // and releases the held file descriptor. Re-drain the append queue first:
     // teardown between the drain above and here (client close, server stop)
@@ -5071,118 +4784,50 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
       await this.eventJournalAppendQueue;
       await this.eventJournal.close();
       this.logger.log("Event journal closed");
+      return true;
     } catch (error) {
       this.logger.log(`Error closing event journal: ${error}`, "error");
+      return false;
     }
+  }
 
-    // Finalize-time journal diet (events.jsonl diet P4): shrink the finished
-    // run's journal now that the storage is closed. Gated on a terminal run
-    // state (RunCompleted/RunFailed — never an attach-disconnect that left
-    // no run), skipped when the shutdown watchdog is close to firing (the
-    // diet is verify-before-unlink and re-runnable offline, so skipping is
-    // always safe), and never allowed to fail the shutdown itself.
-    // The cached fence flag is not enough here: shutdown cancels the
-    // heartbeat, so a takeover landing after the last tick would go
-    // undetected and this diet would unlink the successor's live journal.
-    // Prove ownership FRESH, at the decision point: the lock on disk must
-    // still carry this runtime's own acquisition token.
-    const lockStillOurs = (): boolean => {
-      if (this.lockLostToSuccessor || this.lockId === null) return false;
-      try {
-        const lock = JSON.parse(fs.readFileSync(this.config.lockFile, "utf-8")) as {
-          lockId?: unknown;
-        };
-        return lock.lockId === this.lockId;
-      } catch {
-        return false; // Absent, unreadable, or unparseable: not provably ours.
+  /** Finish execution-directory mutations before releasing ownership. */
+  private async dietFinalizedJournal(reason: string, exitCode?: number): Promise<void> {
+    this.watchdog.reset(reason, this.computeExitCode(reason, exitCode));
+    try {
+      const report = await dietJournal(this.layout.eventsDir, {
+        thresholdBytes: this.config.journalDietThresholdBytes,
+      });
+      if (report.dieted) {
+        this.logger.log(
+          `Event journal dieted: ${report.originalBytes} → ${report.dietedBytes} bytes ` +
+            `(${report.uniqueCasBodies} bodies in CAS, restore with --restore-journal)`,
+        );
       }
-    };
-    if (this.config.dietOnFinalize && !lockStillOurs()) {
-      // Fenced, taken over after the last heartbeat tick, or ownership
-      // unprovable. Dieting would risk unlinking a successor's live
-      // journal; the offline CLI can always diet later.
-      this.logger.log("Journal diet skipped: this runtime cannot prove it still owns runtime.lock");
-    } else if (this.config.dietOnFinalize) {
-      // Resolve the run being finalized. `runForTelemetry` is null on the
-      // codon-failure paths (RunFailed transitioned BEFORE shutdown() was
-      // called, clearing the state's currentRunId), so fall back to the
-      // runtime's own retained run id — failed runs are explicitly in scope
-      // for the diet.
-      const finalRunId = runForTelemetry?.runId ?? this.currentRunId;
-      const finalRun = finalRunId ? this.stateManager.getRun(finalRunId) : null;
-      const runIsTerminal = finalRun?.status === "completed" || finalRun?.status === "failed";
-      if (!runIsTerminal) {
-        this.logger.log("Journal diet skipped: run did not reach a terminal state");
-      } else {
-        // The trace uploader spawns hankweave-trace, which reads
-        // events.jsonl straight off disk — it must run BEFORE the diet
-        // removes that file (spawnSync + the uploadDone guard: the upload
-        // completes here and the later shutdown call becomes a no-op).
-        try {
-          this.uploadTrace?.();
-        } catch (error) {
-          this.logger.log(`Trace upload before journal diet failed: ${error}`, "error");
-        }
-        // That upload is synchronous: it blocks the event loop for its whole
-        // duration (bounded only by its own 60 s spawnSync timeout), so the
-        // watchdog armed at shutdown start cannot fire during it — but it
-        // does not disappear. An overdue timer fires at the diet's first
-        // await and kills the diet mid-flight. Observed in production: a
-        // five-run execution's upload took 39 s and the diet was skipped
-        // with "-9382ms of headroom". The upload is a separately bounded
-        // phase; give the diet its own full watchdog window instead of
-        // inheriting the upload's debt. Shutdown stays hard-bounded
-        // (pre-upload cleanup ≤ watchdog, upload ≤ its spawnSync timeout,
-        // diet ≤ watchdog) — it is just three windows instead of one.
-        this.watchdog.reset(reason, this.computeExitCode(reason, exitCode));
-        try {
-          const report = await dietJournal(this.layout.eventsDir, {
-            thresholdBytes: this.config.journalDietThresholdBytes,
-          });
-          if (report.dieted) {
-            this.logger.log(
-              `Event journal dieted: ${report.originalBytes} → ${report.dietedBytes} bytes ` +
-                `(${report.uniqueCasBodies} bodies in CAS, restore with --restore-journal)`,
-            );
-          }
-        } catch (error) {
-          this.logger.log(`Journal diet failed (original journal left intact): ${error}`, "error");
-        }
-      }
+    } catch (error) {
+      this.logger.log(`Journal diet failed (original journal left intact): ${error}`, "error");
     }
+  }
 
-    this.removeOwnLockFile();
-
-    this.logger.log("Server shutdown complete");
-
-    // Conditionally exit the process based on the exitProcess parameter
-    // In production, we want to exit the process after shutdown
-    // In tests, we don't want to exit to allow other tests to run
-    if (exitProcess && reason !== "running integration test") {
-      // Pass the pre-transition run snapshot: by this point RunCompleted/
-      // RunFailed has cleared currentRunId, so getCurrentRun() inside
-      // computeExitCode returns null and would report success for a run that
-      // was already marked failed/crashed.
-      const finalExitCode = this.computeExitCode(reason, exitCode, runForTelemetry);
-
-      this.logger.log(`Shutdown: ${reason} (exit code: ${finalExitCode})`);
-
-      // Fallback trace upload. In the common case (dietOnFinalize on, lock
-      // still ours, terminal run) the finalize block above already ran the
-      // upload ahead of the journal diet and this is a no-op via the
-      // uploadDone guard. It is the real upload only when that block was
-      // skipped. Synchronous, so it completes before exit rather than
-      // racing an exit handler; the watchdog is cleared synchronously right
-      // after, so a long upload here cannot be interrupted by it.
-      this.uploadTrace?.();
-
-      // Graceful shutdown completed — cancel the watchdog and exit normally.
-      this.watchdog.clear();
-      // Small delay to ensure log is written before process exits
-      setTimeout(() => {
-        process.exit(finalExitCode);
-      }, TIMEOUTS.CODON_CLEANUP_DELAY_MS);
+  private async finalizeJournalForShutdown(
+    runForTelemetry: Run | null,
+    reason: string,
+    exitCode?: number,
+  ): Promise<void> {
+    if (!this.config.dietOnFinalize) return;
+    if (!this.hasTerminalRunForFinalization(runForTelemetry)) {
+      this.logger.log("Journal diet skipped: run did not reach a terminal state");
+      return;
     }
+    await this.dietFinalizedJournal(reason, exitCode);
+  }
+
+  private hasTerminalRunForFinalization(runSnapshot: Run | null): boolean {
+    // RunFailed may already have cleared the state's current run. Keep failed
+    // runs eligible by falling back to the runtime's retained run ID.
+    const finalRunId = runSnapshot?.runId ?? this.currentRunId;
+    const finalRun = finalRunId ? this.stateManager.getRun(finalRunId) : null;
+    return finalRun?.status === "completed" || finalRun?.status === "failed";
   }
 
   /**
@@ -5215,9 +4860,42 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
    * performs minimal cleanup, and exits immediately.
    *
    * @param reason - Reason for force shutdown (for logging)
-   * @param exitProcess - Whether to call process.exit() (default: true, false for tests)
+   * @param exitProcess - Whether to call process.exit() (default: true). Without
+   * process exit, cleanup is bounded by SHUTDOWN_WATCHDOG_MS; a timeout rejects
+   * without signalling stopped, since pending writers still require ownership.
    */
   async forceShutdown(reason: string, exitProcess = true): Promise<void> {
+    const task = this.forceShutdownRuntime(reason, exitProcess);
+    if (shutdownWatchdogWanted(exitProcess, reason)) return task;
+    return this.waitForForcedShutdown(task);
+  }
+
+  private async waitForForcedShutdown(
+    task: Promise<void>,
+    timeoutMs: number = TIMEOUTS.SHUTDOWN_WATCHDOG_MS,
+  ): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        task,
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => {
+            reject(
+              new Error(
+                `Force shutdown timed out after ${timeoutMs}ms; cleanup may still be writing. ` +
+                  "Retain the execution lock until waitForShutdown() resolves.",
+              ),
+            );
+          }, timeoutMs);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  private async forceShutdownRuntime(reason: string, exitProcess: boolean): Promise<void> {
+    this.isShuttingDown = true;
     this.logger.log(`Force shutting down server: ${reason}`);
 
     // A direct force shutdown (no graceful pass first) must still remove
@@ -5251,35 +4929,29 @@ export class HankweaveRuntime extends TypedEventEmitter<ServerInternalEvents> {
     // Minimal cleanup — skip checkpoints, telemetry, state transitions
     this.cleanupCurrentCodon();
 
-    // Close all connected clients
-    for (const [clientId, client] of this.clients) {
-      try {
-        client.close();
-      } catch (error) {
-        this.logger.log(`Error closing client ${clientId}: ${error}`, "error");
+    this.closeConnectionsForShutdown();
+
+    // Hold the lease until the production force-exit. Releasing here would expose pending state,
+    // sentinel, or graceful-finalization writes during the exit delay.
+    if (!shutdownWatchdogWanted(exitProcess, reason)) {
+      if (this.shutdownTask) {
+        await this.shutdownTask;
+      } else {
+        await this.sentinelManager.shutdown();
+        await this.stateManager.waitForPendingTransitions();
+        await this.eventJournalAppendQueue;
+        await this.eventJournal.close();
+        await this.finishDrainedShutdown(async () => {
+          this.clearRuntimeMetadata();
+          return { exitCode: 1 };
+        });
       }
     }
-    this.clients.clear();
-
-    if (this.server) {
-      this.server.stop();
-      this.server = null;
-    }
-
-    // Stop proxy server
-    if (this.proxyRunner) {
-      this.proxyRunner.stop();
-      this.proxyRunner = null;
-    }
-
-    // Remove lock file (only if this runtime acquired it)
-    this.removeOwnLockFile();
 
     this.logger.log("Force shutdown complete");
 
-    // Best-effort trace upload on force shutdown (e.g. second Ctrl+C).
-    // The uploadDone guard prevents double-upload if shutdown() already ran it.
-    this.uploadTrace?.();
+    // Force shutdown skips tracing: writers may not have drained, so there is
+    // no safe snapshot to upload. The graceful path owns any in-flight upload.
 
     if (shutdownWatchdogWanted(exitProcess, reason)) {
       // Force shutdown completed — cancel the watchdog and exit immediately.

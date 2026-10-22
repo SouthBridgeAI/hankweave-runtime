@@ -83,7 +83,7 @@ A **hank** is a sequence of codons (blocks of agentic work). A **codon** is a si
   "id": "build-schema",
   "name": "Build Zod Schemas",
   "promptFile": "./prompts/schema-builder.md",
-  "model": "sonnet",
+  "model": "anthropic/claude-sonnet-5-5",
   "continuationMode": "fresh",
   "checkpointedFiles": ["src/schema/**/*.ts"]
 }

@@ -200,7 +200,7 @@ function writeHank(hankDir: string, opts: { autoCompact?: boolean }): string {
           id: "setup",
           name: "Setup",
           promptText: "Reply with exactly: Setup done.",
-          model: "haiku",
+          model: "anthropic/claude-haiku-4-5",
           continuationMode: "fresh",
         },
         {
@@ -213,7 +213,7 @@ function writeHank(hankDir: string, opts: { autoCompact?: boolean }): string {
               id: "gen",
               name: "Generate",
               promptText: "Run bash echo commands until told the work is finished.",
-              model: "haiku",
+              model: "anthropic/claude-haiku-4-5",
               continuationMode: "continue-previous",
               ...(opts.autoCompact !== undefined ? { autoCompact: opts.autoCompact } : {}),
             },

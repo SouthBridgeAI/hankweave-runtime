@@ -55,7 +55,8 @@ describe("Checkpoints through the Workspace", () => {
   });
 
   afterEach(async () => {
-    rmSync(tempDir, { recursive: true, force: true });
+    // Windows can briefly keep the temporary Git repository locked after a command exits.
+    rmSync(tempDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   });
 
   const workspaceOver = (root: string) =>
@@ -401,7 +402,7 @@ describe("Checkpoints through the Workspace", () => {
       expect(fs.existsSync(legacyGitDir)).toBe(false);
       expect(fs.existsSync(path.join(checkpointPath, ".hankweavecheckpoints"))).toBe(true);
     } finally {
-      rmSync(migrationTempDir, { recursive: true, force: true });
+      rmSync(migrationTempDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   });
 
@@ -530,7 +531,7 @@ describe("Checkpoints through the Workspace", () => {
       // Should contain the .hankweavecheckpoints files as regular files
       expect(output).toContain(".hankweave/checkpoints/.hankweavecheckpoints/HEAD");
     } finally {
-      rmSync(submoduleTempDir, { recursive: true, force: true });
+      rmSync(submoduleTempDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   });
 });
@@ -579,7 +580,8 @@ describe("GitWorkspaceStorage crash-safe initialization", () => {
   });
 
   afterEach(() => {
-    rmSync(tempDir, { recursive: true, force: true });
+    // Retry transient Windows locks, but still fail if the repository cannot be removed.
+    rmSync(tempDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   });
 
   const readLog = () => (fs.existsSync(logPath) ? fs.readFileSync(logPath, "utf-8") : "");

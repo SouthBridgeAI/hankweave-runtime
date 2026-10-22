@@ -5,9 +5,9 @@ import {
   modelInfoSchema,
   modelLimitsSchema,
   modelsDataSchema,
-  modelsDevApiResponseSchema,
+  modelsDevModelSchema,
   providerInfoSchema,
-} from "../../server/llm/models-dev-schema";
+} from "../../server/llm/internal/models-dev-schema.js";
 
 describe("Models Dev Schema Validation", () => {
   describe("modelCostSchema", () => {
@@ -134,61 +134,47 @@ describe("Models Dev Schema Validation", () => {
     });
   });
 
-  describe("modelsDevApiResponseSchema", () => {
-    it("should validate realistic API response structure", () => {
-      const apiResponse = {
-        anthropic: {
-          name: "Anthropic",
-          models: {
-            "claude-3-haiku": {
-              name: "Claude 3 Haiku",
-              attachment: true,
-              reasoning: false,
-              tool_call: true,
-              temperature: true,
-              cost: {
-                input: 0.25,
-                output: 1.25,
-              },
-              limit: {
-                context: 200000,
-                output: 4096,
-              },
-              modalities: {
-                input: ["text", "image"],
-                output: ["text"],
-              },
-              release_date: "2024-03-13",
-              last_updated: "2024-03-13",
-            },
-          },
+  describe("modelsDevModelSchema (one models.dev api.json row)", () => {
+    it("should validate a realistic row", () => {
+      const row = {
+        name: "Claude 3 Haiku",
+        attachment: true,
+        reasoning: false,
+        tool_call: true,
+        temperature: true,
+        cost: {
+          input: 0.25,
+          output: 1.25,
         },
+        limit: {
+          context: 200000,
+          output: 4096,
+        },
+        modalities: {
+          input: ["text", "image"],
+          output: ["text"],
+        },
+        release_date: "2024-03-13",
+        last_updated: "2024-03-13",
       };
 
-      expect(() => modelsDevApiResponseSchema.parse(apiResponse)).not.toThrow();
+      expect(() => modelsDevModelSchema.parse(row)).not.toThrow();
     });
 
-    it("should validate API response with optional cost field", () => {
-      const apiResponseNoCost = {
-        testprovider: {
-          name: "Test Provider",
-          models: {
-            "test-model": {
-              name: "Test Model",
-              attachment: false,
-              reasoning: true,
-              tool_call: false,
-              temperature: true,
-              limit: { context: 100000, output: 2048 },
-              modalities: { input: ["text"], output: ["text"] },
-              release_date: "2024-01",
-              last_updated: "2024-01",
-            },
-          },
-        },
+    it("should validate a row without a cost field", () => {
+      const rowNoCost = {
+        name: "Test Model",
+        attachment: false,
+        reasoning: true,
+        tool_call: false,
+        temperature: true,
+        limit: { context: 100000, output: 2048 },
+        modalities: { input: ["text"], output: ["text"] },
+        release_date: "2024-01",
+        last_updated: "2024-01",
       };
 
-      expect(() => modelsDevApiResponseSchema.parse(apiResponseNoCost)).not.toThrow();
+      expect(() => modelsDevModelSchema.parse(rowNoCost)).not.toThrow();
     });
   });
 
@@ -198,7 +184,7 @@ describe("Models Dev Schema Validation", () => {
       const fs = await import("node:fs/promises");
       const path = await import("node:path");
 
-      const dataPath = path.join(process.cwd(), "server/llm/models-dev-data.json");
+      const dataPath = path.join(process.cwd(), "server/llm/internal/models-dev-data.json");
       const dataContent = await fs.readFile(dataPath, "utf-8");
       const data = JSON.parse(dataContent);
 

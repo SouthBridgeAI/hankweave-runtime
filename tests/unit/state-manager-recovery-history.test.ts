@@ -97,7 +97,7 @@ describe("StateManager recovery with explicit checkpoint histories", () => {
       createTestCodon({
         id,
         name: id,
-        model: "haiku",
+        model: "anthropic/claude-haiku-4-5",
         continuationMode: "fresh",
         promptText: id,
         checkpointedFiles: ["*.txt"],

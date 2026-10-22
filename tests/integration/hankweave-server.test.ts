@@ -2,7 +2,9 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { ExecutionLayout } from "../../server/execution-layout.js";
 import { HankweaveRuntime } from "../../server/hankweave-runtime.js";
+import { RuntimeLock } from "../../server/runtime-lock.js";
 import {
   type ErrorEvent,
   type HistoryBatchEvent,
@@ -39,6 +41,7 @@ function parseServerEvent(data: string) {
 describe("HankweaveRuntime", () => {
   let server: HankweaveRuntime | null = null;
   let executionDir: string;
+  let lock: RuntimeLock;
   // Track all WebSocket clients created during tests for automatic cleanup
   const testClients: WebSocket[] = [];
 
@@ -86,6 +89,15 @@ describe("HankweaveRuntime", () => {
       JSON.stringify({ runs: [], currentRunId: null, executionPlan: [] }),
     );
 
+    fs.writeFileSync(
+      path.join(hankweaveDir, "execution-meta.json"),
+      JSON.stringify({
+        version: "1.2.0",
+        createdAt: "original",
+        runtime: { port: 1234, proxyPort: 1235 },
+      }),
+    );
+
     // Load codon configs if they exist
     let codons = [];
     if (fs.existsSync(CODONS_CONFIG)) {
@@ -103,36 +115,39 @@ describe("HankweaveRuntime", () => {
     serverPort = await getFreePort();
     serverUrl = `ws://localhost:${serverPort}`;
 
-    server = new HankweaveRuntime({
-      autostart: false,
-      port: serverPort,
-      cwd: executionDir,
-      executionPath: executionDir,
-      agentRootPath: executionDir, // Use same path for tests
-      rigArchivePath: path.join(executionDir, "rigArchive"),
-      dataPathInExecutionDir: dataDir,
-      readOnlySourceDataPath: dataDir,
-      dataHash: `test-hash-${TEST_TIMESTAMP}`,
-      isNewExecution: true,
-      isResuming: false,
-      linkType: "symlink",
-      codons: codons,
-      socketLogFile: path.join(logsDir, "socket.jsonl"),
-      serverLogFile: path.join(logsDir, "server.log"),
-      outputDirectory: executionDir,
-      sentinel: {
-        enablePersistence: true,
-        healthCheckGracePeriodMs: 0,
-        waitForAllHealthChecks: false,
+    lock = await RuntimeLock.acquire(executionDir);
+    server = new HankweaveRuntime(
+      {
+        autostart: false,
+        port: serverPort,
+        cwd: executionDir,
+        executionPath: executionDir,
+        agentRootPath: executionDir, // Use same path for tests
+        rigArchivePath: path.join(executionDir, "rigArchive"),
+        dataPathInExecutionDir: dataDir,
+        readOnlySourceDataPath: dataDir,
+        dataHash: `test-hash-${TEST_TIMESTAMP}`,
+        isNewExecution: true,
+        isResuming: false,
+        linkType: "symlink",
+        codons: codons,
+        socketLogFile: path.join(logsDir, "socket.jsonl"),
+        serverLogFile: path.join(logsDir, "server.log"),
+        outputDirectory: executionDir,
+        sentinel: {
+          enablePersistence: true,
+          healthCheckGracePeriodMs: 0,
+          waitForAllHealthChecks: false,
+        },
+        logParsingInterval: 1000,
+        dataHashTimeLimit: 5000,
+        toolResultTruncateLength: 2500,
+        withoutProxy: true,
+        handshakeHistoryLimit: 50,
+        version: "1.0.0",
       },
-      logParsingInterval: 1000,
-      dataHashTimeLimit: 5000,
-      toolResultTruncateLength: 2500,
-      withoutProxy: true,
-      handshakeHistoryLimit: 50,
-      version: "1.0.0",
-      lockFile: path.join(hankweaveDir, "runtime.lock"),
-    });
+      lock,
+    );
     await server.start();
   });
 
@@ -159,8 +174,26 @@ describe("HankweaveRuntime", () => {
         console.log("Server already shut down or error during shutdown:", error);
       }
     }
+    await lock.release();
     // Note: We keep the test results for debugging, but clean up execution directory
     // The test-area directory will be cleaned up on next run
+  });
+
+  it("publishes ports in execution metadata and clears them on shutdown", async () => {
+    if (!server) throw new Error("Server did not start");
+    const stateDir = path.join(executionDir, ".hankweave");
+    const leasePath = new ExecutionLayout(executionDir).runtimeLockPath;
+    const metaPath = path.join(stateDir, "execution-meta.json");
+    expect(fs.statSync(leasePath).isDirectory()).toBe(true);
+    expect(JSON.parse(fs.readFileSync(metaPath, "utf8")).runtime).toEqual({ port: serverPort });
+    await server.shutdown("test cleanup", false);
+    expect(fs.existsSync(leasePath)).toBe(true); // Runtime leaves release to the command.
+    await lock.release();
+    expect(fs.existsSync(leasePath)).toBe(false);
+    expect(JSON.parse(fs.readFileSync(metaPath, "utf8"))).toEqual({
+      version: "1.2.0",
+      createdAt: "original",
+    });
   });
 
   it("runs on expected port", async () => {

@@ -38,7 +38,7 @@ describe("checkpoint policy follows the execution position", () => {
       ({
         id,
         name: id,
-        model: "haiku",
+        model: "anthropic/claude-haiku-4-5",
         continuationMode: "fresh",
         promptText: id,
         checkpointedFiles,

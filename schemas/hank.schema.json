@@ -46,7 +46,7 @@
           "properties": {
             "model": {
               "type": "string",
-              "description": "Override model for this hank (e.g., 'sonnet' for Claude, 'flash' for Gemini, 'This task needs high reasoning')"
+              "description": "Model for every codon in this hank, replacing each codon's own model. Written like a codon's model: '<provider>/<model>', e.g. 'anthropic/claude-opus-5-5'."
             },
             "dataHashTimeLimit": {
               "type": "integer",
@@ -167,6 +167,98 @@
           "type": "string",
           "description": "Global system prompt text applied to all codons"
         },
+        "models": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[^/\\s]+\\/\\S+$",
+                "description": "Model id as 'provider/model'."
+              },
+              "basedOn": {
+                "type": "string",
+                "pattern": "^[^/\\s]+\\/\\S+$",
+                "description": "A catalog model ('provider/model') to inherit every unspecified field from."
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Display name."
+              },
+              "cost": {
+                "type": "object",
+                "properties": {
+                  "input": {
+                    "type": "number",
+                    "minimum": 0,
+                    "description": "USD per million input tokens."
+                  },
+                  "output": {
+                    "type": "number",
+                    "minimum": 0,
+                    "description": "USD per million output tokens."
+                  },
+                  "cacheRead": {
+                    "type": "number",
+                    "minimum": 0,
+                    "description": "USD per million cache-read tokens."
+                  },
+                  "cacheWrite": {
+                    "type": "number",
+                    "minimum": 0,
+                    "description": "USD per million cache-write tokens."
+                  }
+                },
+                "required": [
+                  "input",
+                  "output"
+                ],
+                "additionalProperties": false,
+                "description": "Price per million tokens: what runs record for this model, over the harness's own price. Omit to keep the price of basedOn, or of the catalog's record for this id."
+              },
+              "limit": {
+                "type": "object",
+                "properties": {
+                  "context": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "description": "Context window, tokens."
+                  },
+                  "output": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "description": "Maximum output tokens per request."
+                  }
+                },
+                "required": [
+                  "context",
+                  "output"
+                ],
+                "additionalProperties": false,
+                "description": "Token limits. Required for a model the catalog does not know, unless basedOn supplies them."
+              },
+              "reasoning": {
+                "type": "boolean",
+                "description": "Supports extended reasoning."
+              },
+              "toolCall": {
+                "type": "boolean",
+                "description": "Supports tool calling."
+              },
+              "attachment": {
+                "type": "boolean",
+                "description": "Accepts file attachments."
+              }
+            },
+            "required": [
+              "id"
+            ],
+            "additionalProperties": false
+          },
+          "description": "Model records this hank adds to the model catalog: models newer than every catalog source, or corrected prices and limits (hankweave.json `models` entries win over these)."
+        },
         "hank": {
           "type": "array",
           "items": {
@@ -233,7 +325,7 @@
                   "model": {
                     "type": "string",
                     "minLength": 1,
-                    "description": "Model to use for this codon. Can be a Claude model ('sonnet', 'opus'), Gemini model ('gemini-2.0-flash-exp', 'flash'), or any other model supported by the configured shim."
+                    "description": "Model for this codon, as '<provider>/<model>' exactly as the harness that runs it knows it ('anthropic/claude-sonnet-5-5', 'openai-codex/gpt-5.6-sol', 'openrouter/moonshotai/kimi-k3'), or 'pi/<provider>/<model>' to run it through Pi. Case-sensitive; no shortcuts. A model is accepted once its harness confirms it can run it; anything else fails validation with ids to use instead."
                   },
                   "continuationMode": {
                     "type": "string",
@@ -1005,7 +1097,7 @@
                                 },
                                 "model": {
                                   "type": "string",
-                                  "description": "The full model ID to use (e.g., \"anthropic/claude-3-5-sonnet-20241022\", \"openai/gpt-4-turbo\")."
+                                  "description": "The model to call, as '<provider>/<model>' for a provider sentinels run on (anthropic, openai, google, groq, deepseek, amazon-bedrock), e.g. 'anthropic/claude-haiku-4-5'."
                                 },
                                 "structuredOutput": {
                                   "type": "object",
@@ -1376,7 +1468,7 @@
                         "model": {
                           "type": "string",
                           "minLength": 1,
-                          "description": "Model to use for this codon. Can be a Claude model ('sonnet', 'opus'), Gemini model ('gemini-2.0-flash-exp', 'flash'), or any other model supported by the configured shim."
+                          "description": "Model for this codon, as '<provider>/<model>' exactly as the harness that runs it knows it ('anthropic/claude-sonnet-5-5', 'openai-codex/gpt-5.6-sol', 'openrouter/moonshotai/kimi-k3'), or 'pi/<provider>/<model>' to run it through Pi. Case-sensitive; no shortcuts. A model is accepted once its harness confirms it can run it; anything else fails validation with ids to use instead."
                         },
                         "continuationMode": {
                           "type": "string",
@@ -2148,7 +2240,7 @@
                                       },
                                       "model": {
                                         "type": "string",
-                                        "description": "The full model ID to use (e.g., \"anthropic/claude-3-5-sonnet-20241022\", \"openai/gpt-4-turbo\")."
+                                        "description": "The model to call, as '<provider>/<model>' for a provider sentinels run on (anthropic, openai, google, groq, deepseek, amazon-bedrock), e.g. 'anthropic/claude-haiku-4-5'."
                                       },
                                       "structuredOutput": {
                                         "type": "object",

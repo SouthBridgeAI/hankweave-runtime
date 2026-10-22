@@ -59,7 +59,7 @@ describe("Sentinel HankweaveServer Integration", () => {
         trigger: { type: "event", on: ["info"] },
         execution: { strategy: "immediate" },
         userPromptText: "test",
-        model: "mockmodel", // No slash - uses fallback
+        model: "anthropic/claude-haiku-4-5",
       };
 
       await manager.loadSentinelsForCodon([config], CodonId("test-codon"), {
@@ -73,7 +73,7 @@ describe("Sentinel HankweaveServer Integration", () => {
 
       expect(states).toHaveLength(1);
       expect(states[0].id).toBe("test-sentinel");
-      expect(states[0].model).toBe("mockmodel"); // Match config
+      expect(states[0].model).toBe("anthropic/claude-haiku-4-5"); // Match config
       expect(states[0].llmCallCount).toBe(0);
       expect(states[0].totalTriggers).toBe(0);
       expect(states[0].status).toBe("active");
@@ -96,7 +96,7 @@ describe("Sentinel HankweaveServer Integration", () => {
         trigger: { type: "event", on: ["info"] },
         execution: { strategy: "immediate" },
         userPromptText: "Count events",
-        model: "mockmodel", // No slash - uses fallback
+        model: "anthropic/claude-haiku-4-5",
       };
 
       await manager.loadSentinelsForCodon([config], CodonId("test-codon"), {
@@ -129,7 +129,7 @@ describe("Sentinel HankweaveServer Integration", () => {
         trigger: { type: "event", on: ["*"] },
         execution: { strategy: "count", threshold: 10 },
         userPromptText: "test",
-        model: "mockmodel", // No slash - uses fallback
+        model: "anthropic/claude-haiku-4-5",
       };
 
       await manager.loadSentinelsForCodon([config], CodonId("test-codon"), {
@@ -209,7 +209,7 @@ describe("Sentinel HankweaveServer Integration", () => {
         trigger: { type: "event", on: ["info"] },
         execution: { strategy: "immediate" },
         userPromptText: "test: <%= it.events.length %>",
-        model: "mockmodel", // No slash - uses fallback
+        model: "anthropic/claude-haiku-4-5",
         reportToWebsocket: {
           outputs: true,
           triggers: true,

@@ -18,7 +18,7 @@ const templates: Record<string, string> = {
     {
       "id": "analyze-haiku",
       "name": "Analyze Project (Haiku)",
-      "model": "haiku",
+      "model": "anthropic/claude-haiku-4-5",
       "continuationMode": "fresh",
       "promptFile": "./prompts/analyze-haiku.md",
       "checkpointedFiles": ["analysis-haiku.md"],
@@ -78,7 +78,7 @@ Your analysis should include:
 
 1. Very brief overview of the files in that directory
 
-Please create your analysis in a file called \`analysis-haiku.md\` in the execution directory.`,
+Please write your analysis to \`<%AGENT_ROOT%>/analysis-haiku.md\` in your agent workspace (the current working directory).`,
 
   "prompts/analyze-gemini.md": `# Project Analysis (Gemini)
 
@@ -90,7 +90,7 @@ Your analysis should include:
 
 1. Very brief overview of the files in that directory
 
-Please create your analysis in a file called \`analysis-gemini.md\` in the execution directory.`,
+Please write your analysis to \`<%AGENT_ROOT%>/analysis-gemini.md\` in your agent workspace (the current working directory).`,
 
   "prompts/analyze-pi.md": `# Project Analysis (Pi)
 
@@ -100,7 +100,7 @@ Your analysis should include:
 
 1. Very brief overview of the files in that directory
 
-Please create your analysis in a file called \`analysis-pi.md\` in the execution directory.`,
+Please write your analysis to \`<%AGENT_ROOT%>/analysis-pi.md\` in your agent workspace (the current working directory).`,
 
   "prompts/analyze-gpt.md": `# Project Analysis (GPT)
 
@@ -110,7 +110,7 @@ Your analysis should include:
 
 1. Very brief overview of the files in that directory
 
-Please create your analysis in a file called \`analysis-gpt.md\` in the execution directory.`,
+Please write your analysis to \`<%AGENT_ROOT%>/analysis-gpt.md\` in your agent workspace (the current working directory).`,
 
   "README.md": `# Hank
 
@@ -125,14 +125,14 @@ This hank was initialized with \`hankweave init\`.
 
 ## Auth
 
-- The \`haiku\`, \`pi/anthropic/...\`, and \`pi/google/...\` codons need \`ANTHROPIC_API_KEY\` (or a Claude Code login) and \`GEMINI_API_KEY\`.
-- The \`pi/openai-codex/gpt-5.6-terra\` codon runs on a **ChatGPT subscription** (no \`OPENAI_API_KEY\`): the OAuth credential is read from Pi's store at \`~/.pi/agent/auth.json\`. Put it there with \`pi login\` (choose "OpenAI (ChatGPT Plus/Pro)"). No subscription? Delete that codon, or switch its model to a keyed spelling like \`gpt-5.5\` with \`OPENAI_API_KEY\` set.
+- The \`anthropic/...\`, \`pi/anthropic/...\`, and \`pi/google/...\` codons need \`ANTHROPIC_API_KEY\` (or a Claude Code login) and \`GEMINI_API_KEY\`.
+- The \`pi/openai-codex/gpt-5.6-terra\` codon runs on a **ChatGPT subscription** (no \`OPENAI_API_KEY\`): the OAuth credential is read from Pi's store at \`~/.pi/agent/auth.json\`. Put it there with \`pi login\` (choose "OpenAI (ChatGPT Plus/Pro)"). No subscription? Delete that codon, or switch its model to a keyed spelling like \`openai/gpt-5.5\` with \`OPENAI_API_KEY\` set.
 
 ## Customization
 
 Edit \`hank.json\` to customize your workflow:
 - Add more codons to the \`hank\` array
-- Change the \`model\` (haiku, sonnet, opus, pi/google/gemini-2.5-flash, pi/openai-codex/gpt-5.6-terra, etc.)
+- Change the \`model\`: always \`<provider>/<model>\` (anthropic/claude-sonnet-5-5, google/gemini-2.5-flash, openai-codex/gpt-5.6-terra, or pi/<provider>/<model> to force Pi)
 - Add \`rigSetup\` to prepare your environment before a codon runs
 - Configure \`checkpointedFiles\` to track files in git checkpoints
 - Use \`overrides\` to suggest runtime settings (model, port, etc.)

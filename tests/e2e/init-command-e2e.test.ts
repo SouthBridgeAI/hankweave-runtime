@@ -162,7 +162,7 @@ function assertGeneratedRun(executionDir: string, agentRootPath: string) {
 
   // Verify the in-process Pi agent persisted its session transcripts.
   // Only when a codon actually ran on Pi: HANKWEAVE_RUNTIME_MODEL
-  // overrides EVERY codon's model (scripts/e2e/test-new-models.ts uses it
+  // overrides EVERY codon's model (scripts/verify-models.ts --codon uses it
   // for new-model smoke runs), and an anthropic/ override routes all
   // codons — including analyze-pi — through the Claude SDK, so no Pi
   // session ever exists.

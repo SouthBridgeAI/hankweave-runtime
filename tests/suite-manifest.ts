@@ -118,7 +118,7 @@ export interface SuiteSpec {
 
 /**
  * Every env var that can buy an LLM call, from `PROVIDER_DEFINITIONS`
- * (server/llm/provider-config.ts) and `PROVIDER_CREDENTIALS`
+ * (server/sentinels/provider-config.ts) and `PROVIDER_CREDENTIALS`
  * (server/pi-sdk-manager.ts), plus the removed `GOOGLE_API_KEY` alias which is
  * still set in plenty of shells.
  *
@@ -216,6 +216,24 @@ export const SUITES: SuiteSpec[] = [
   },
 
   // ── e2e-offline ─────────────────────────────────────────────────────
+  {
+    id: "e2e-runtime-lock-agents",
+    tier: "e2e-offline",
+    files: ["tests/e2e/runtime-lock-agents-e2e.test.ts"],
+    description: "Lease takeover stops Claude subprocesses and Pi Bash commands; offline writers.",
+    failureMeans:
+      "A compromised runtime kept its SDK subprocess alive or released the successor's lock. " +
+      "Check synchronous child fencing and the command-scoped lease-loss exit path.",
+    suspects: [
+      "server/runtime-lock.ts",
+      "server/claude-agent-sdk-manager.ts",
+      "server/pi-sdk-manager.ts",
+    ],
+    perTestTimeoutMs: 90_000,
+    suiteTimeoutSeconds: 120,
+    estSeconds: 20,
+    estCostUsd: 0,
+  },
   {
     id: "e2e-budget",
     tier: "e2e-offline",
@@ -392,9 +410,9 @@ export const SUITES: SuiteSpec[] = [
     files: ["tests/e2e/llm-provider-fallback.e2e.test.ts"],
     description: "Provider fallback and degradation against a mocked registry.",
     failureMeans:
-      "Provider fallback/degradation order broke against a mocked registry — model resolution " +
-      "or fallback selection logic, deterministic and offline.",
-    suspects: ["server/llm"],
+      "Provider fallback/degradation order broke against a mocked registry — sentinel provider " +
+      "health, model lookup or fallback selection logic, deterministic and offline.",
+    suspects: ["server/sentinels/provider-health.ts", "server/llm"],
     perTestTimeoutMs: 30_000,
     suiteTimeoutSeconds: 300,
     estSeconds: 1,
@@ -748,12 +766,17 @@ export const SUITES: SuiteSpec[] = [
     id: "e2e-llm-provider-health",
     tier: "e2e-heavy",
     files: ["tests/e2e/llm-provider-health.e2e.test.ts"],
-    description: "Live health checks against every provider with a key; skips the rest.",
+    description:
+      "Live health checks against every provider with a key; skips the rest. Keylessly checks " +
+      "that every provider whose health check lists models still refuses that list without a " +
+      "valid key.",
     failureMeans:
       "A provider health ping failed. Check WHICH provider before suspecting hankweave: an " +
       "invalid key or provider outage reddens this without any code change. Only a failure " +
-      "across all providers points at the registry/health-check plumbing itself.",
-    suspects: ["server/llm"],
+      "across all providers points at the provider-health plumbing itself. A 'refuses its " +
+      "model list' failure means the provider changed: its list went public (the health check " +
+      "proves nothing for it any more) or moved; the failure message names the fix.",
+    suspects: ["server/sentinels/provider-health.ts", "server/provider-probe.ts"],
     needsEnv: ANTHROPIC,
     // Pings whichever of these are configured; each skips cleanly when absent.
     optionalEnv: ["OPENAI_API_KEY", "GEMINI_API_KEY", "GROQ_API_KEY", "DEEPSEEK_API_KEY"],

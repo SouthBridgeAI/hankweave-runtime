@@ -147,7 +147,7 @@ describe("claude-sdk codon against a local mock provider", () => {
             id: "codon-claude-mock",
             name: "Claude SDK Mock Codon",
             promptText: `Reply with exactly: ${MOCK_REPLY}`,
-            model: "haiku",
+            model: "anthropic/claude-haiku-4-5",
             continuationMode: "fresh",
           },
         ],

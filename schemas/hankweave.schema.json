@@ -28,7 +28,7 @@
         "model": {
           "type": "string",
           "minLength": 1,
-          "description": "User's preferred default model. Can be a short name like 'sonnet' or 'opus', a Gemini model like 'gemini-2.0-flash', or any model supported by the configured providers. Validation happens at runtime via LLMRegistry."
+          "description": "Model for every codon, replacing each codon's own model. Written like a codon's model: '<provider>/<model>', e.g. 'anthropic/claude-sonnet-5-5'. Checked with its harness at startup."
         },
         "anthropicBaseUrl": {
           "type": "string",
@@ -130,9 +130,113 @@
               "type": "number",
               "exclusiveMinimum": 0,
               "description": "Global wall-clock time limit in seconds. Effective = min(runtime, hank)."
+            },
+            "unpricedModels": {
+              "type": "string",
+              "enum": [
+                "estimate",
+                "refuse"
+              ],
+              "description": "What a dollar budget does with a model whose price no catalog source knows. 'estimate' (default) counts its tokens at a flagged ceiling estimate (the highest price among the model's siblings); 'refuse' fails validation instead."
             }
           },
           "additionalProperties": false
+        },
+        "noOnlineModelChecks": {
+          "type": "boolean",
+          "description": "Stop Hankweave looking models up online (models.dev, LiteLLM prices, the model overlay, pi.dev, providers' model lists); the catalog then uses the model data bundled with this version plus its cache. Calls to the models themselves are unaffected. Env: HANKWEAVE_RUNTIME_NO_ONLINE_MODEL_CHECKS."
+        },
+        "models": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[^/\\s]+\\/\\S+$",
+                "description": "Model id as 'provider/model'."
+              },
+              "basedOn": {
+                "type": "string",
+                "pattern": "^[^/\\s]+\\/\\S+$",
+                "description": "A catalog model ('provider/model') to inherit every unspecified field from."
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Display name."
+              },
+              "cost": {
+                "type": "object",
+                "properties": {
+                  "input": {
+                    "type": "number",
+                    "minimum": 0,
+                    "description": "USD per million input tokens."
+                  },
+                  "output": {
+                    "type": "number",
+                    "minimum": 0,
+                    "description": "USD per million output tokens."
+                  },
+                  "cacheRead": {
+                    "type": "number",
+                    "minimum": 0,
+                    "description": "USD per million cache-read tokens."
+                  },
+                  "cacheWrite": {
+                    "type": "number",
+                    "minimum": 0,
+                    "description": "USD per million cache-write tokens."
+                  }
+                },
+                "required": [
+                  "input",
+                  "output"
+                ],
+                "additionalProperties": false,
+                "description": "Price per million tokens: what runs record for this model, over the harness's own price. Omit to keep the price of basedOn, or of the catalog's record for this id."
+              },
+              "limit": {
+                "type": "object",
+                "properties": {
+                  "context": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "description": "Context window, tokens."
+                  },
+                  "output": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "description": "Maximum output tokens per request."
+                  }
+                },
+                "required": [
+                  "context",
+                  "output"
+                ],
+                "additionalProperties": false,
+                "description": "Token limits. Required for a model the catalog does not know, unless basedOn supplies them."
+              },
+              "reasoning": {
+                "type": "boolean",
+                "description": "Supports extended reasoning."
+              },
+              "toolCall": {
+                "type": "boolean",
+                "description": "Supports tool calling."
+              },
+              "attachment": {
+                "type": "boolean",
+                "description": "Accepts file attachments."
+              }
+            },
+            "required": [
+              "id"
+            ],
+            "additionalProperties": false
+          },
+          "description": "Model records added to the model catalog for every run from this directory: new models, or the deployment's real prices and limits. Merged over hank.json `models`."
         },
         "$schema": {
           "type": "string",

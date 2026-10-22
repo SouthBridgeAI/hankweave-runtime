@@ -92,7 +92,7 @@ describe("JSON Schema Generation", () => {
           {
             id: "test-codon",
             name: "Test Codon",
-            model: "sonnet",
+            model: "anthropic/claude-sonnet-4-6",
             continuationMode: "fresh",
             promptText: "Hello world",
           },
@@ -108,7 +108,7 @@ describe("JSON Schema Generation", () => {
           {
             id: "test",
             name: "Test",
-            model: "sonnet",
+            model: "anthropic/claude-sonnet-4-6",
             continuationMode: "fresh",
             promptText: "test",
           },
@@ -129,7 +129,7 @@ describe("JSON Schema Generation", () => {
               {
                 id: "loop-codon",
                 name: "Loop Codon",
-                model: "sonnet",
+                model: "anthropic/claude-sonnet-4-6",
                 continuationMode: "continue-previous",
                 promptText: "iterate",
               },
@@ -147,7 +147,7 @@ describe("JSON Schema Generation", () => {
           {
             id: "test",
             name: "Test",
-            model: "sonnet",
+            model: "anthropic/claude-sonnet-4-6",
             continuationMode: "fresh",
             promptText: "test",
           },
@@ -158,12 +158,12 @@ describe("JSON Schema Generation", () => {
 
     test("accepts config with overrides", () => {
       const config = {
-        overrides: { model: "opus", dataHashTimeLimit: 10000 },
+        overrides: { model: "anthropic/claude-opus-4-6", dataHashTimeLimit: 10000 },
         hank: [
           {
             id: "test",
             name: "Test",
-            model: "sonnet",
+            model: "anthropic/claude-sonnet-4-6",
             continuationMode: "fresh",
             promptText: "test",
           },
@@ -178,7 +178,7 @@ describe("JSON Schema Generation", () => {
           {
             id: "test",
             name: "Test",
-            model: "sonnet",
+            model: "anthropic/claude-sonnet-4-6",
             continuationMode: "fresh",
             promptFile: "./prompts/test.md",
           },
@@ -193,7 +193,7 @@ describe("JSON Schema Generation", () => {
           {
             id: "test",
             name: "Test",
-            model: "sonnet",
+            model: "anthropic/claude-sonnet-4-6",
             continuationMode: "fresh",
             promptFile: ["./prompts/part1.md", "./prompts/part2.md"],
           },
@@ -209,7 +209,14 @@ describe("JSON Schema Generation", () => {
 
     test("rejects codon missing required id", () => {
       const config = {
-        hank: [{ name: "Test", model: "sonnet", continuationMode: "fresh", promptText: "test" }],
+        hank: [
+          {
+            name: "Test",
+            model: "anthropic/claude-sonnet-4-6",
+            continuationMode: "fresh",
+            promptText: "test",
+          },
+        ],
       };
       expect(validate(config)).toBe(false);
     });
@@ -220,7 +227,7 @@ describe("JSON Schema Generation", () => {
           {
             id: "test",
             name: "Test",
-            model: "sonnet",
+            model: "anthropic/claude-sonnet-4-6",
             continuationMode: "invalid",
             promptText: "test",
           },
@@ -249,7 +256,7 @@ describe("JSON Schema Generation", () => {
       const config = {
         port: 8080,
         autostart: false,
-        model: "opus",
+        model: "anthropic/claude-opus-4-6",
       };
       expect(validate(config)).toBe(true);
     });

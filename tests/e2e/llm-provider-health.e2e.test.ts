@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it } from "bun:test";
-import { LlmProviderRegistry } from "../../server/llm/llm-provider-registry.js";
-import { PROVIDER_DEFINITIONS } from "../../server/llm/provider-config.js";
+import { bundledCatalogSnapshot } from "../../server/llm/internal/catalog-store.js";
+import { isProbeableProvider, probeProviderAccess } from "../../server/provider-probe.js";
+import { PROVIDER_DEFINITIONS } from "../../server/sentinels/provider-config.js";
+import { ProviderHealth } from "../../server/sentinels/provider-health.js";
 import { Logger } from "../../server/utils.js";
 import { captureEnv, restoreEnv } from "../utils/env-test-helpers.js";
 
@@ -36,7 +38,7 @@ describe("LLM Provider Health Checks (E2E)", () => {
           return;
         }
 
-        const registry = new LlmProviderRegistry({
+        const registry = new ProviderHealth({
           logger: mockLogger,
           healthCheckTimeout: 10000, // 10s for real API calls
         });
@@ -72,7 +74,7 @@ describe("LLM Provider Health Checks (E2E)", () => {
         return;
       }
 
-      const registry = new LlmProviderRegistry({
+      const registry = new ProviderHealth({
         logger: mockLogger,
         healthCheckTimeout: 1, // 1ms - guaranteed timeout
       });
@@ -90,13 +92,16 @@ describe("LLM Provider Health Checks (E2E)", () => {
     });
 
     it("should calculate costs accurately for real models", () => {
-      const registry = new LlmProviderRegistry({ logger: mockLogger });
+      const registry = new ProviderHealth({ logger: mockLogger });
 
       // Test with actual models from the loaded data
-      const availableModels = registry.getAvailableModels();
+      const models = [
+        "anthropic/claude-haiku-4-5",
+        "openai/gpt-4o-mini",
+        "google/gemini-2.5-flash",
+      ];
 
-      for (const modelId of availableModels.slice(0, 3)) {
-        // Test first 3 models
+      for (const modelId of models) {
         const modelInfoResult = registry.getModelInfo(modelId);
         if (!modelInfoResult.success) continue;
 
@@ -154,7 +159,7 @@ describe("LLM Provider Health Checks (E2E)", () => {
         const provider1 = PROVIDER_DEFINITIONS[0];
         process.env[provider1.apiKeyEnvVar] = "test-key";
 
-        let reg = new LlmProviderRegistry({ logger: mockLogger });
+        let reg = new ProviderHealth({ logger: mockLogger });
         let status = reg.getProviderStatus();
         expect(status.get(provider1.id)?.status).toBe("available");
 
@@ -168,7 +173,7 @@ describe("LLM Provider Health Checks (E2E)", () => {
           const provider2 = PROVIDER_DEFINITIONS[1];
           process.env[provider2.apiKeyEnvVar] = "test-key-2";
 
-          reg = new LlmProviderRegistry({ logger: mockLogger });
+          reg = new ProviderHealth({ logger: mockLogger });
           status = reg.getProviderStatus();
           expect(status.get(provider1.id)?.status).toBe("available");
           expect(status.get(provider2.id)?.status).toBe("available");
@@ -180,17 +185,13 @@ describe("LLM Provider Health Checks (E2E)", () => {
     });
 
     it("should load model data correctly from JSON file", () => {
-      const registry = new LlmProviderRegistry({ logger: mockLogger });
-      const stats = registry.getStats();
+      const registry = new ProviderHealth({ logger: mockLogger });
 
-      console.log("Registry statistics:", stats);
-
-      // Should have loaded models from the data file
-      expect(stats.totalModels).toBeGreaterThan(0);
-      expect(stats.totalProviders).toBe(PROVIDER_DEFINITIONS.length);
+      // Should have loaded models from the data file, and a status per provider
+      expect(bundledCatalogSnapshot().rows.length).toBeGreaterThan(0);
+      expect(registry.getProviderStatus().size).toBe(PROVIDER_DEFINITIONS.length);
 
       // Test a few specific models we know exist in the data
-      // Use provider-specific ID: this model is resold by many providers at different prices
       const claudeHaikuResult = registry.getModelInfo("anthropic/claude-haiku-4-5-20251001");
       expect(claudeHaikuResult.success).toBe(true);
       if (claudeHaikuResult.success) {
@@ -198,7 +199,6 @@ describe("LLM Provider Health Checks (E2E)", () => {
         expect(claudeHaikuResult.info.cost?.input).toBe(1);
       }
 
-      // Use provider-specific ID to avoid ambiguity (gpt-4o exists in multiple providers)
       const gpt4oResult = registry.getModelInfo("openai/gpt-4o");
       expect(gpt4oResult.success).toBe(true);
       if (gpt4oResult.success) {
@@ -210,15 +210,11 @@ describe("LLM Provider Health Checks (E2E)", () => {
 
   describe("model information", () => {
     it("should provide accurate model information", () => {
-      const registry = new LlmProviderRegistry({ logger: mockLogger });
+      const registry = new ProviderHealth({ logger: mockLogger });
 
-      // Test model lookup by short name. Many providers resell this model with
-      // differing limits, so only assert on the identity of the resolved model.
+      // A bare model id doesn't resolve: sentinel models are "provider/model"
       const claudeHaikuResult = registry.getModelInfo("claude-haiku-4-5-20251001");
-      expect(claudeHaikuResult.success).toBe(true);
-      if (claudeHaikuResult.success) {
-        expect(claudeHaikuResult.info.modelId).toBe("claude-haiku-4-5-20251001");
-      }
+      expect(claudeHaikuResult.success).toBe(false);
 
       // Test model lookup by full name
       const claudeHaikuFullResult = registry.getModelInfo("anthropic/claude-haiku-4-5-20251001");
@@ -230,16 +226,19 @@ describe("LLM Provider Health Checks (E2E)", () => {
       }
 
       // Test non-existent model
-      const nonExistentResult = registry.getModelInfo("non-existent-model");
+      const nonExistentResult = registry.getModelInfo("anthropic/non-existent-model");
       expect(nonExistentResult.success).toBe(false);
     });
 
     it("should find cheapest models for each provider", () => {
-      const registry = new LlmProviderRegistry({ logger: mockLogger });
+      const registry = new ProviderHealth({ logger: mockLogger });
+      const rows = bundledCatalogSnapshot().rows;
 
       // Test that we can find models for each provider
       for (const providerDef of PROVIDER_DEFINITIONS) {
-        const modelsForProvider = registry.getModelsForProvider(providerDef.id);
+        const modelsForProvider = rows
+          .filter((row) => row.providerId === providerDef.id)
+          .map((row) => `${row.providerId}/${row.modelId}`);
 
         if (modelsForProvider.length > 0) {
           console.log(`${providerDef.id}: ${modelsForProvider.length} models available`);
@@ -267,5 +266,43 @@ describe("LLM Provider Health Checks (E2E)", () => {
         }
       }
     });
+  });
+
+  // A health check that lists models proves the key works only while the
+  // provider refuses its list to a request without one. These need no keys:
+  // they send hankweave's own health-check request with an empty key and a
+  // made-up one, and require an authentication rejection. Anything else —
+  // a 200 (the list went public), a 404 (the endpoint moved), a timeout — is
+  // a change the health check has to follow.
+  describe("model lists that health checks rely on refuse invalid keys", () => {
+    const listed = PROVIDER_DEFINITIONS.filter((def) => isProbeableProvider(def.id));
+    const invalidKeys = {
+      "an empty key": "",
+      "a made-up key": "hankweave-health-check-test-not-a-real-key",
+    };
+    const authRejections = [400, 401, 403];
+
+    for (const def of listed) {
+      it(`${def.id} refuses its model list without a valid key`, async () => {
+        for (const [label, key] of Object.entries(invalidKeys)) {
+          const access = await probeProviderAccess(def.id, key, { timeoutMs: 15_000 });
+          expect(
+            access.ok,
+            `${def.id} served its model list to ${label}. Its health check (a model-list call, ` +
+              "server/provider-probe.ts) now passes with any key; health-check it by " +
+              "generation instead (checkByGeneration in server/sentinels/provider-health.ts).",
+          ).toBe(false);
+          if (!access.ok) {
+            // No status means the provider never answered (network error, timeout).
+            expect(
+              access.status !== undefined && authRejections.includes(access.status),
+              `${def.id} answered ${label} with something other than an authentication ` +
+                `rejection (${access.reason}). Either the provider is down or the health check's ` +
+                "request is out of date.",
+            ).toBe(true);
+          }
+        }
+      }, 60_000);
+    }
   });
 });

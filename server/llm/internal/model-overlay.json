@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "updated": "2026-09-29",
+  "corrections": [
+    {
+      "model": "deepseek/deepseek-flash",
+      "cost": {
+        "input": 0.3,
+        "output": 1.2,
+        "cache_read": 0.006
+      },
+      "reason": "models.dev lists the off-peak rate. DeepSeek charges double during peak hours (01:00-04:00 and 06:00-10:00 UTC, Monday to Friday); budgets use the peak rate",
+      "source": "https://api-docs.deepseek.com/quick_start/pricing"
+    },
+    {
+      "model": "deepseek/deepseek-v4-pro",
+      "cost": {
+        "input": 1.32,
+        "output": 3.96,
+        "cache_read": 0.044
+      },
+      "reason": "models.dev lists $0.435/$0.87 per M. DeepSeek's published rate is $1.32/$3.96 per M at peak and half that off-peak; budgets use the peak rate",
+      "source": "https://api-docs.deepseek.com/quick_start/pricing"
+    }
+  ]
+}

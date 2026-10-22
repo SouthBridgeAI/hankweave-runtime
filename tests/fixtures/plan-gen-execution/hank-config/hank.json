@@ -10,7 +10,7 @@
     {
       "id": "step-1-main",
       "name": "Step 1: Prep",
-      "model": "sonnet",
+      "model": "anthropic/claude-sonnet-4-6",
       "continuationMode": "fresh",
       "promptFile": ["./codons/codon-1-fetch/0-fetch-and-enrich.md"],
       "appendSystemPromptFile": ["./codons/system-prompt-broad.md"],
@@ -19,7 +19,7 @@
     {
       "id": "step-2-plan",
       "name": "Step 2: Gemini Plan and CC",
-      "model": "opus",
+      "model": "anthropic/claude-opus-4-6",
       "continuationMode": "fresh",
       "promptFile": "./codons/codon-2-plan-cc/1-cc-prompt.md",
       "appendSystemPromptFile": "./codons/codon-2-plan-cc/0-plan-gen.md"
@@ -27,7 +27,7 @@
     {
       "id": "step-3-codex",
       "name": "Step 3: Plan with Codex",
-      "model": "gpt-5.2",
+      "model": "openai/gpt-5.2",
       "continuationMode": "fresh",
       "promptFile": "./codons/codon-2-plan-cc/1-codex-prompt.md",
       "appendSystemPromptFile": "./codons/codon-2-plan-cc/0-plan-gen.md"
@@ -35,7 +35,7 @@
     {
       "id": "step-4-merge",
       "name": "Step 4: Review and merge plans",
-      "model": "opus",
+      "model": "anthropic/claude-opus-4-6",
       "continuationMode": "fresh",
       "promptFile": "./codons/codon-4-merge/0-merge.md",
       "appendSystemPromptFile": ["./codons/system-prompt-broad.md"]
@@ -52,7 +52,7 @@
         {
           "id": "step-5-blind-review",
           "name": "Step 5: Review the merged plan with fresh eyes",
-          "model": "sonnet",
+          "model": "anthropic/claude-sonnet-4-6",
           "continuationMode": "fresh",
           "promptFile": "./codons/codon-5-review/0-review.md",
           "appendSystemPromptFile": ["./codons/system-prompt-broad.md"]
@@ -60,7 +60,7 @@
         {
           "id": "step-6-update",
           "name": "Step 6: Update the plan based on the review",
-          "model": "opus",
+          "model": "anthropic/claude-opus-4-6",
           "continuationMode": "fresh",
           "promptFile": "./codons/codon-6-update/0-update.md",
           "appendSystemPromptFile": ["./codons/system-prompt-broad.md"]
@@ -79,7 +79,7 @@
         {
           "id": "implement-loop-step-1-implement",
           "name": "Implement-Review Loop: Implementing core functionality",
-          "model": "sonnet",
+          "model": "anthropic/claude-sonnet-4-6",
           "continuationMode": "fresh",
           "promptFile": "./codons/codon-7-implement-review-loop/0-implement.md",
           "appendSystemPromptFile": ["./codons/system-prompt-broad.md"]
@@ -87,7 +87,7 @@
         {
           "id": "implement-loop-step-2-update",
           "name": "Implement-review loop: Update the plan based on the implementation results",
-          "model": "opus",
+          "model": "anthropic/claude-opus-4-6",
           "continuationMode": "fresh",
           "promptFile": "./codons/codon-7-implement-review-loop/1-update.md",
           "appendSystemPromptFile": ["./codons/system-prompt-broad.md"]
@@ -97,7 +97,7 @@
     {
       "id": "final-step-compress",
       "name": "Final Step: Tie everything into a clean bow",
-      "model": "opus",
+      "model": "anthropic/claude-opus-4-6",
       "continuationMode": "fresh",
       "promptFile": "./codons/codon-8-compress/0-compress.md",
       "appendSystemPromptFile": ["./codons/system-prompt-broad.md"]

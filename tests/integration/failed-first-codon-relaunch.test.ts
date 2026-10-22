@@ -21,6 +21,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { ExecutionLayout } from "../../server/execution-layout.js";
 import { HankweaveRuntime } from "../../server/hankweave-runtime.js";
+import { RuntimeLock } from "../../server/runtime-lock.js";
 import { StateManager } from "../../server/state-manager.js";
 import { CodonId, RunId, SessionId } from "../../server/types/branded-types.js";
 import type * as ST from "../../server/types/state-types.js";
@@ -32,7 +33,7 @@ const codons = [
   createTestCodon({
     id: "one",
     name: "One",
-    model: "sonnet",
+    model: "anthropic/claude-sonnet-4-6",
     continuationMode: "fresh",
     promptText: "1",
     rigSetup: [{ type: "copy", copy: { from: "rig-template", to: "one-rig" } }],
@@ -40,14 +41,14 @@ const codons = [
   createTestCodon({
     id: "two",
     name: "Two",
-    model: "sonnet",
+    model: "anthropic/claude-sonnet-4-6",
     continuationMode: "fresh",
     promptText: "2",
   }),
   createTestCodon({
     id: "three",
     name: "Three",
-    model: "sonnet",
+    model: "anthropic/claude-sonnet-4-6",
     continuationMode: "fresh",
     promptText: "3",
   }),
@@ -56,10 +57,12 @@ const codons = [
 let execDir: string;
 let hankweaveDir: string;
 let runtime: HankweaveRuntime | undefined;
+let lock: RuntimeLock;
 
-beforeEach(() => {
+beforeEach(async () => {
   fs.mkdirSync(path.resolve("tests", "test-area"), { recursive: true });
   execDir = fs.mkdtempSync(path.resolve("tests", "test-area", "failed-first-codon-"));
+  lock = await RuntimeLock.acquire(execDir);
   hankweaveDir = path.join(execDir, ".hankweave");
   for (const d of ["logs", "events", "runs", "checkpoints"]) {
     fs.mkdirSync(path.join(hankweaveDir, d), { recursive: true });
@@ -73,6 +76,7 @@ afterEach(async () => {
     // best-effort
   }
   runtime = undefined;
+  await lock.release();
   fs.rmSync(execDir, { recursive: true, force: true });
 });
 
@@ -146,37 +150,39 @@ test("relaunch after the first codon failed retries that codon, not the next one
 
   // 3. Relaunch. autostart is off so the recovery decision can be inspected
   //    instead of a codon being started.
-  runtime = new HankweaveRuntime({
-    autostart: false,
-    headless: true,
-    port: 0,
-    cwd: execDir,
-    executionPath: execDir,
-    agentRootPath: execDir,
-    rigArchivePath: path.join(execDir, "rigArchive"),
-    dataPathInExecutionDir: execDir,
-    readOnlySourceDataPath: execDir,
-    dataHash: "test-hash",
-    isNewExecution: false,
-    isResuming: true,
-    linkType: "symlink",
-    codons,
-    socketLogFile: path.join(hankweaveDir, "logs/socket.jsonl"),
-    serverLogFile: path.join(hankweaveDir, "logs/server.log"),
-    outputDirectory: execDir,
-    sentinel: {
-      enablePersistence: false,
-      healthCheckGracePeriodMs: 0,
-      waitForAllHealthChecks: false,
+  runtime = new HankweaveRuntime(
+    {
+      autostart: false,
+      headless: true,
+      port: 0,
+      cwd: execDir,
+      executionPath: execDir,
+      agentRootPath: execDir,
+      rigArchivePath: path.join(execDir, "rigArchive"),
+      dataPathInExecutionDir: execDir,
+      readOnlySourceDataPath: execDir,
+      dataHash: "test-hash",
+      isNewExecution: false,
+      isResuming: true,
+      linkType: "symlink",
+      codons,
+      socketLogFile: path.join(hankweaveDir, "logs/socket.jsonl"),
+      serverLogFile: path.join(hankweaveDir, "logs/server.log"),
+      outputDirectory: execDir,
+      sentinel: {
+        enablePersistence: false,
+        healthCheckGracePeriodMs: 0,
+        waitForAllHealthChecks: false,
+      },
+      logParsingInterval: 5,
+      dataHashTimeLimit: 5000,
+      toolResultTruncateLength: 2500,
+      withoutProxy: true,
+      handshakeHistoryLimit: 50,
+      version: "1.0.0",
     },
-    logParsingInterval: 5,
-    dataHashTimeLimit: 5000,
-    toolResultTruncateLength: 2500,
-    withoutProxy: true,
-    handshakeHistoryLimit: 50,
-    version: "1.0.0",
-    lockFile: path.join(hankweaveDir, "runtime.lock"),
-  });
+    lock,
+  );
   await runtime.start();
 
   const internals = runtime as unknown as { stateManager: StateManager };

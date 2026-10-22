@@ -24,7 +24,7 @@ describe("getFlagValue", () => {
     });
 
     test("returns value when flag is in middle of args", () => {
-      const args = ["--headless", "--port", "8080", "--model", "opus"];
+      const args = ["--headless", "--port", "8080", "--model", "anthropic/claude-opus-4-6"];
       expect(getFlagValue(args, "--port")).toBe("8080");
     });
 
@@ -34,9 +34,9 @@ describe("getFlagValue", () => {
     });
 
     test("handles multiple different flags", () => {
-      const args = ["--port", "8080", "--model", "opus"];
+      const args = ["--port", "8080", "--model", "anthropic/claude-opus-4-6"];
       expect(getFlagValue(args, "--port")).toBe("8080");
-      expect(getFlagValue(args, "--model")).toBe("opus");
+      expect(getFlagValue(args, "--model")).toBe("anthropic/claude-opus-4-6");
     });
 
     test("does not warn for preferred syntax", () => {
@@ -80,7 +80,7 @@ describe("getFlagValue", () => {
 
   describe("missing or invalid flags", () => {
     test("returns undefined when flag is not present", () => {
-      const args = ["--headless", "--model", "opus"];
+      const args = ["--headless", "--model", "anthropic/claude-opus-4-6"];
       expect(getFlagValue(args, "--port")).toBeUndefined();
     });
 
@@ -95,7 +95,7 @@ describe("getFlagValue", () => {
     });
 
     test("returns undefined when next arg is another value flag", () => {
-      const args = ["--port", "--model", "opus"];
+      const args = ["--port", "--model", "anthropic/claude-opus-4-6"];
       expect(getFlagValue(args, "--port")).toBeUndefined();
     });
 
@@ -247,31 +247,31 @@ describe("parseCliArgs", () => {
     expect(result.dataPath).toBeUndefined();
   });
 
-  test("hankweave --model opus", () => {
-    const args = ["--model", "opus"];
+  test("hankweave --model anthropic/claude-opus-4-6", () => {
+    const args = ["--model", "anthropic/claude-opus-4-6"];
     const result = parseCliArgs(args);
-    expect(result.model).toBe("opus");
+    expect(result.model).toBe("anthropic/claude-opus-4-6");
     expect(result.hankPath).toBeUndefined();
     expect(result.dataPath).toBeUndefined();
   });
 
-  test("hankweave --model sonnet", () => {
-    const args = ["--model", "sonnet"];
+  test("hankweave --model anthropic/claude-sonnet-4-6", () => {
+    const args = ["--model", "anthropic/claude-sonnet-4-6"];
     const result = parseCliArgs(args);
-    expect(result.model).toBe("sonnet");
+    expect(result.model).toBe("anthropic/claude-sonnet-4-6");
     expect(result.hankPath).toBeUndefined();
     expect(result.dataPath).toBeUndefined();
   });
 
   test("hankweave --model=opus (deprecated syntax)", () => {
-    const args = ["--model=opus"];
+    const args = ["--model=anthropic/claude-opus-4-6"];
     const result = parseCliArgs(args);
-    expect(result.model).toBe("opus");
+    expect(result.model).toBe("anthropic/claude-opus-4-6");
     expect(result.hankPath).toBeUndefined();
     expect(result.dataPath).toBeUndefined();
   });
 
-  test("hankweave --model haiku (accepts any string)", () => {
+  test("hankweave --model haiku (passes any string through; models are checked later)", () => {
     const args = ["--model", "haiku"];
     const result = parseCliArgs(args);
     expect(result.model).toBe("haiku");
@@ -444,12 +444,12 @@ describe("parseCliArgs", () => {
     expect(() => parseCliArgs(args)).toThrow("requires a value");
   });
 
-  test("hankweave --port 9090 --model opus --anthropic-base-url https://api.example.com --no-autostart --proxy --idle-timeout 120 --shim-idle-timeout 45", () => {
+  test("hankweave --port 9090 --model anthropic/claude-opus-4-6 --anthropic-base-url https://api.example.com --no-autostart --proxy --idle-timeout 120 --shim-idle-timeout 45", () => {
     const args = [
       "--port",
       "9090",
       "--model",
-      "opus",
+      "anthropic/claude-opus-4-6",
       "--anthropic-base-url",
       "https://api.example.com",
       "--no-autostart",
@@ -462,7 +462,7 @@ describe("parseCliArgs", () => {
     const result = parseCliArgs(args);
 
     expect(result.port).toBe(9090);
-    expect(result.model).toBe("opus");
+    expect(result.model).toBe("anthropic/claude-opus-4-6");
     expect(result.anthropicBaseUrl).toBe("https://api.example.com");
     expect(result.autostart).toBe(false);
     expect(result.withoutProxy).toBe(false);
@@ -472,22 +472,22 @@ describe("parseCliArgs", () => {
     expect(result.dataPath).toBeUndefined();
   });
 
-  test("hankweave --port=8080 --model sonnet --idle-timeout=60 (mixed syntax)", () => {
-    const args = ["--port=8080", "--model", "sonnet", "--idle-timeout=60"];
+  test("hankweave --port=8080 --model anthropic/claude-sonnet-4-6 --idle-timeout=60 (mixed syntax)", () => {
+    const args = ["--port=8080", "--model", "anthropic/claude-sonnet-4-6", "--idle-timeout=60"];
     const result = parseCliArgs(args);
 
     expect(result.port).toBe(8080);
-    expect(result.model).toBe("sonnet");
+    expect(result.model).toBe("anthropic/claude-sonnet-4-6");
     expect(result.idleTimeout).toBe(60);
     expect(consoleWarnSpy.length).toBe(2); // Two deprecated flags
   });
 
-  test("hankweave --no-autostart --model opus --port 7777 (any order)", () => {
-    const args = ["--no-autostart", "--model", "opus", "--port", "7777"];
+  test("hankweave --no-autostart --model anthropic/claude-opus-4-6 --port 7777 (any order)", () => {
+    const args = ["--no-autostart", "--model", "anthropic/claude-opus-4-6", "--port", "7777"];
     const result = parseCliArgs(args);
 
     expect(result.autostart).toBe(false);
-    expect(result.model).toBe("opus");
+    expect(result.model).toBe("anthropic/claude-opus-4-6");
     expect(result.port).toBe(7777);
     expect(result.hankPath).toBeUndefined();
     expect(result.dataPath).toBeUndefined();
@@ -510,11 +510,11 @@ describe("parseCliArgs", () => {
     expect(result.port).toBeUndefined();
   });
 
-  test("hankweave --port 8080 --model opus (complete values)", () => {
-    const args = ["--port", "8080", "--model", "opus"];
+  test("hankweave --port 8080 --model anthropic/claude-opus-4-6 (complete values)", () => {
+    const args = ["--port", "8080", "--model", "anthropic/claude-opus-4-6"];
     const result = parseCliArgs(args);
     expect(result.port).toBe(8080);
-    expect(result.model).toBe("opus");
+    expect(result.model).toBe("anthropic/claude-opus-4-6");
     expect(result.hankPath).toBeUndefined();
     expect(result.dataPath).toBeUndefined();
   });
@@ -533,8 +533,8 @@ describe("parseCliArgs", () => {
     expect(result.dataPath).toBeUndefined();
   });
 
-  test("hankweave --port 8080 --model opus (return type validation)", () => {
-    const args = ["--port", "8080", "--model", "opus"];
+  test("hankweave --port 8080 --model anthropic/claude-opus-4-6 (return type validation)", () => {
+    const args = ["--port", "8080", "--model", "anthropic/claude-opus-4-6"];
     const result = parseCliArgs(args);
 
     expect(typeof result).toBe("object");
@@ -544,12 +544,12 @@ describe("parseCliArgs", () => {
     expect(result.dataPath).toBeUndefined();
   });
 
-  test("hankweave --port 8080 --model opus --anthropic-base-url https://api.example.com --no-autostart --proxy --idle-timeout 120 (type validation)", () => {
+  test("hankweave --port 8080 --model anthropic/claude-opus-4-6 --anthropic-base-url https://api.example.com --no-autostart --proxy --idle-timeout 120 (type validation)", () => {
     const args = [
       "--port",
       "8080",
       "--model",
-      "opus",
+      "anthropic/claude-opus-4-6",
       "--anthropic-base-url",
       "https://api.example.com",
       "--no-autostart",
@@ -589,8 +589,8 @@ describe("parseCliArgs", () => {
     expect(result.dataPath).toBeUndefined();
   });
 
-  test("hankweave --port 8080 --model opus (no warnings for preferred syntax)", () => {
-    const args = ["--port", "8080", "--model", "opus"];
+  test("hankweave --port 8080 --model anthropic/claude-opus-4-6 (no warnings for preferred syntax)", () => {
+    const args = ["--port", "8080", "--model", "anthropic/claude-opus-4-6"];
     const result = parseCliArgs(args);
     expect(consoleWarnSpy.length).toBe(0);
     expect(result.hankPath).toBeUndefined();
@@ -598,7 +598,7 @@ describe("parseCliArgs", () => {
   });
 
   test("hankweave --port=8080 --model=opus --idle-timeout=60 (multiple deprecation warnings)", () => {
-    const args = ["--port=8080", "--model=opus", "--idle-timeout=60"];
+    const args = ["--port=8080", "--model=anthropic/claude-opus-4-6", "--idle-timeout=60"];
     const result = parseCliArgs(args);
     expect(consoleWarnSpy.length).toBe(3);
     expect(result.hankPath).toBeUndefined();
@@ -630,22 +630,29 @@ describe("parseCliArgs", () => {
     expect(result.port).toBe(8080);
   });
 
-  test("hankweave --headless my-hank.json --no-autostart ./data --model opus", () => {
-    const args = ["--headless", "my-hank.json", "--no-autostart", "./data", "--model", "opus"];
+  test("hankweave --headless my-hank.json --no-autostart ./data --model anthropic/claude-opus-4-6", () => {
+    const args = [
+      "--headless",
+      "my-hank.json",
+      "--no-autostart",
+      "./data",
+      "--model",
+      "anthropic/claude-opus-4-6",
+    ];
     const result = parseCliArgs(args);
     expect(result.hankPath).toBe("my-hank.json");
     expect(result.dataPath).toBe("./data");
-    expect(result.model).toBe("opus");
+    expect(result.model).toBe("anthropic/claude-opus-4-6");
     expect(result.autostart).toBe(false);
   });
 
   test("hankweave --port=8080 my-hank.json --model=opus ./data", () => {
-    const args = ["--port=8080", "my-hank.json", "--model=opus", "./data"];
+    const args = ["--port=8080", "my-hank.json", "--model=anthropic/claude-opus-4-6", "./data"];
     const result = parseCliArgs(args);
     expect(result.hankPath).toBe("my-hank.json");
     expect(result.dataPath).toBe("./data");
     expect(result.port).toBe(8080);
-    expect(result.model).toBe("opus");
+    expect(result.model).toBe("anthropic/claude-opus-4-6");
   });
 
   test("hankweave --config my-hank.json --data ./data (flags instead of positional)", () => {
@@ -718,14 +725,14 @@ describe("parseCliArgs", () => {
     expect(result.dataPath).toBe("second");
   });
 
-  test("hankweave my-hank.json ./data --port 9090 --model opus --no-autostart --proxy", () => {
+  test("hankweave my-hank.json ./data --port 9090 --model anthropic/claude-opus-4-6 --no-autostart --proxy", () => {
     const args = [
       "my-hank.json",
       "./data",
       "--port",
       "9090",
       "--model",
-      "opus",
+      "anthropic/claude-opus-4-6",
       "--no-autostart",
       "--proxy",
     ];
@@ -733,7 +740,7 @@ describe("parseCliArgs", () => {
     expect(result.hankPath).toBe("my-hank.json");
     expect(result.dataPath).toBe("./data");
     expect(result.port).toBe(9090);
-    expect(result.model).toBe("opus");
+    expect(result.model).toBe("anthropic/claude-opus-4-6");
     expect(result.autostart).toBe(false);
     expect(result.withoutProxy).toBe(false);
   });
@@ -1072,7 +1079,7 @@ describe("parseCliArgs", () => {
     });
 
     test("should not set ignoreRigFailures even with other flags present", () => {
-      const args = ["--port", "8080", "--model", "opus", "hank.json"];
+      const args = ["--port", "8080", "--model", "anthropic/claude-opus-4-6", "hank.json"];
       const result = parseCliArgs(args);
       // The property should not exist in the result object
       expect("ignoreRigFailures" in result).toBe(false);
@@ -1179,8 +1186,8 @@ describe("parseCliArgs", () => {
     });
 
     test("-m should work as --model", () => {
-      const result = parseCliArgs(["-m", "opus"]);
-      expect(result.model).toBe("opus");
+      const result = parseCliArgs(["-m", "anthropic/claude-opus-4-6"]);
+      expect(result.model).toBe("anthropic/claude-opus-4-6");
     });
 
     test("-n should work as --start-new", () => {
@@ -1198,12 +1205,21 @@ describe("parseCliArgs", () => {
       expect(result.force).toBe(true);
     });
 
-    test("combining short flags: -n -f -e ./exec -m opus -p 8080", () => {
-      const result = parseCliArgs(["-n", "-f", "-e", "./exec", "-m", "opus", "-p", "8080"]);
+    test("combining short flags: -n -f -e ./exec -m anthropic/claude-opus-4-6 -p 8080", () => {
+      const result = parseCliArgs([
+        "-n",
+        "-f",
+        "-e",
+        "./exec",
+        "-m",
+        "anthropic/claude-opus-4-6",
+        "-p",
+        "8080",
+      ]);
       expect(result.startNew).toBe(true);
       expect(result.force).toBe(true);
       expect(result.executionPath).toBe("./exec");
-      expect(result.model).toBe("opus");
+      expect(result.model).toBe("anthropic/claude-opus-4-6");
       expect(result.port).toBe(8080);
     });
   });

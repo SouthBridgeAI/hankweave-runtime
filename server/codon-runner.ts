@@ -1,5 +1,3 @@
-import os from "node:os";
-import path from "node:path";
 import type { Budget } from "./budget.js";
 import { ClaudeAgentSDKManager } from "./claude-agent-sdk-manager.js";
 import { ClaudeLogParser } from "./claude-log-parser.js";
@@ -11,14 +9,12 @@ import {
 import { TIMEOUTS } from "./config.js";
 import { CostTracker } from "./cost-tracker.js";
 import { classifyApiErrorText } from "./error-classification.js";
-import type { LlmProviderRegistry } from "./llm/llm-provider-registry.js";
-import type { ModelInfo } from "./llm/models-dev-schema.js";
+import type { ModelInfo, Models } from "./llm/index.js";
 import { PiSdkManager } from "./pi-sdk-manager.js";
 import {
   AMAZON_BEDROCK_PROVIDER_ID,
   CLAUDE_AGENT_SDK_HARNESS,
   selectHarness,
-  toPiTarget,
 } from "./provider-ids.js";
 import { ReplayProcessManager } from "./replay-process-manager.js";
 import type { FileNode } from "./schemas/event-schemas.js";
@@ -33,7 +29,7 @@ import type {
   UserMessage,
 } from "./types/claude-session-schema.js";
 import { APITimeoutError } from "./types/error-types.js";
-import type { ClaudeLogMessage, Codon, ShimSelfTestResult, TokenUsage } from "./types/types.js";
+import type { ClaudeLogMessage, Codon, TokenUsage } from "./types/types.js";
 import { isSyntheticTimeout } from "./types/types.js";
 import type { Logger } from "./utils.js";
 import type { WorkspaceFiles } from "./workspace/files.js";
@@ -123,7 +119,8 @@ interface BaseCodonRunnerConfig {
   /** Workspace files; the tracker selects this codon's watched scope. */
   files: WorkspaceFiles;
   logger: Logger;
-  llmRegistry: LlmProviderRegistry;
+  /** Model records, for pricing usage the codon's own record does not cover. */
+  models: Pick<Models, "get">;
   logParsingInterval?: number;
   anthropicBaseUrl?: string;
   logPath: string;
@@ -384,7 +381,7 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
     this.logPath = config.logPath;
 
     // Create cost tracker for this codon
-    this.costTracker = new CostTracker(config.codon.model, config.llmRegistry, config.logger);
+    this.costTracker = new CostTracker(config.codon.model, config.models, config.logger);
 
     // Wire cost tracking: CostTracker events → state transitions + enriched runner events
     this.costTracker.on("costIncremented", (delta) => {
@@ -456,116 +453,12 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
   }
 
   /**
-   * Check if a model can be run by CodonRunner.
-   *
-   * CodonRunner supports:
-   * - Anthropic models via ClaudeAgentSDKManager (in-process Claude SDK)
-   * - Everything else via PiSdkManager (in-process Pi coding agent)
-   *
-   * selectHarness covers the whole model space (pi is the universal fallback),
-   * so every registry-resolvable model is runnable.
-   *
-   * @param model - The ModelInfo to check
-   * @returns true if the model can be executed, false otherwise
+   * Whether some harness runs this model (spec 72: the same predicates model
+   * validation routes by). False only for a plan persisted by an earlier
+   * version whose provider no harness runs.
    */
   static canRun(model: ModelInfo): boolean {
-    return Boolean(selectHarness(model));
-  }
-
-  /**
-   * Run self-test for a model without creating a full CodonRunner instance.
-   * Useful for validation and testing where you only have model info.
-   *
-   * @param modelInfo - The model to test
-   * @param executionPath - Temporary execution path for the test
-   * @param logger - Logger instance for recording test progress
-   * @param anthropicBaseUrl - Optional custom Anthropic API base URL
-   * @returns Promise resolving to self-test results
-   */
-  static async runSelfTestForModel(
-    modelInfo: ModelInfo,
-    executionPath: string,
-    logger: Logger,
-    anthropicBaseUrl?: string,
-  ): Promise<ShimSelfTestResult> {
-    const harness = selectHarness(modelInfo);
-
-    // Create temporary log parser (required by managers)
-    const tempLogParserPath = path.join(os.tmpdir(), `self-test-parser-${Date.now()}.jsonl`);
-    const tempLogParser = new ClaudeLogParser({
-      logPath: tempLogParserPath,
-      codonId: "self-test" as CodonId,
-      parsingInterval: 100,
-      logger,
-    });
-
-    try {
-      let result: ShimSelfTestResult;
-
-      if (harness === CLAUDE_AGENT_SDK_HARNESS) {
-        // Use Claude Agent SDK Manager for Anthropic models
-        logger.log(
-          `Testing Claude Agent SDK for model: ${modelInfo.name} (${modelInfo.providerId}/${modelInfo.modelId})`,
-          "info",
-        );
-
-        // For self-tests, use executionPath as agentRootPath (temporary directory, no nested structure)
-        const manager = new ClaudeAgentSDKManager(
-          executionPath,
-          executionPath, // Self-tests don't need the full nested structure
-          logger,
-          tempLogParser,
-          anthropicBaseUrl,
-          undefined,
-          undefined,
-          modelInfo.providerId.toLowerCase() === AMAZON_BEDROCK_PROVIDER_ID,
-        );
-
-        result = await manager.runSelfTest();
-      } else {
-        // Use the in-process Pi SDK manager for non-Anthropic models
-        logger.log(
-          `Testing Pi SDK for model: ${modelInfo.name} (${modelInfo.providerId}/${modelInfo.modelId})`,
-          "info",
-        );
-
-        // For self-tests, use executionPath as agentRootPath (temporary directory, no nested structure)
-        const manager = new PiSdkManager(
-          executionPath,
-          executionPath, // Self-tests don't need the full nested structure
-          logger,
-          tempLogParser,
-        );
-
-        // Pass the dispatch-derived pi routing string — the stored modelId no
-        // longer carries a provider prefix.
-        result = await manager.runSelfTest(toPiTarget(modelInfo.providerId, modelInfo.modelId));
-      }
-
-      // Log results
-      logger.log(
-        `Self-test ${result.overall.passed ? "PASSED" : "FAILED"}: ${result.overall.message}`,
-        result.overall.passed ? "info" : "error",
-      );
-
-      for (const check of result.checks) {
-        logger.log(
-          `  - ${check.name}: ${check.passed ? "✓" : "✗"} ${check.message}`,
-          check.passed ? "info" : "error",
-        );
-      }
-
-      return result;
-    } finally {
-      // Clean up temporary log parser
-      tempLogParser.stop();
-
-      // Clean up temporary log file if it exists
-      const fs = await import("node:fs");
-      if (fs.existsSync(tempLogParserPath)) {
-        fs.unlinkSync(tempLogParserPath);
-      }
-    }
+    return selectHarness(model) !== undefined;
   }
 
   /**
@@ -724,7 +617,7 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
   }
 
   /**
-   * Create process manager (SDK, Shim, or Replay) based on model type with event forwarding
+   * Create an SDK or replay manager based on model type with event forwarding.
    */
   private createProcessManager(): ClaudeAgentSDKManager | PiSdkManager | ReplayProcessManager {
     let processManager: ClaudeAgentSDKManager | PiSdkManager | ReplayProcessManager;
@@ -746,6 +639,13 @@ export class CodonRunner extends TypedEventEmitter<CodonRunnerEvents> {
     } else {
       const modelInfo = this.config.codon.model;
       const harness = selectHarness(modelInfo);
+      if (!harness) {
+        throw new Error(
+          `No harness runs '${modelInfo.providerId}/${modelInfo.modelId}' (a model recorded by an earlier ` +
+            "hankweave). Start a new run with the model written as '<provider>/<model>' for a provider " +
+            "the Claude Agent SDK or Pi runs.",
+        );
+      }
 
       if (harness === CLAUDE_AGENT_SDK_HARNESS) {
         // Use Claude Agent SDK for Anthropic models (Bedrock-hosted included)

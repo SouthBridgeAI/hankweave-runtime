@@ -8,7 +8,6 @@
  */
 
 import { detectClaudeExecutable, isLegacyClaudeAuthEnabled } from "../claude-agent-sdk-manager.js";
-import { LlmProviderRegistry } from "../llm/llm-provider-registry.js";
 import { resolveProviderApiKey } from "../pi-sdk-manager.js";
 import { CLAUDE_AGENT_SDK_HARNESS, type Harness, PI_HARNESS } from "../provider-ids.js";
 
@@ -149,16 +148,17 @@ export function checkEnvironment(): EnvironmentResult {
 
 /**
  * Fallback model configuration for running the demo hank.
- * The demo hank uses "haiku" (Anthropic). When the user doesn't have
+ * The demo hank uses anthropic/claude-haiku-4-5. When the user doesn't have
  * Anthropic credentials, we override with -m to use an available provider
  * (routed through the embedded Pi agent).
  *
- * Fallback order: Anthropic (haiku) > OpenAI (gpt-5.2) > Google (gemini-2.5-flash)
+ * Fallback order: Anthropic (claude-haiku-4-5) > OpenAI (openai/gpt-5.2) >
+ * Google (google/gemini-2.5-flash)
  */
 export interface DemoModelChoice {
   /** Provider name for display */
   providerName: string;
-  /** Model name to pass via -m flag (undefined = use hank default / haiku) */
+  /** Model to pass via -m, as '<provider>/<model>' (undefined = the hank's own) */
   modelOverride: string | undefined;
   /** The provider being used */
   provider: "anthropic" | "openai" | "google";
@@ -178,21 +178,21 @@ export function getDemoModelChoice(env: EnvironmentResult): DemoModelChoice | nu
   if (claudeHarnessFound && keyFound("Anthropic")) {
     return {
       providerName: "Claude",
-      modelOverride: undefined, // Demo hank already uses haiku
+      modelOverride: undefined, // The demo hank already uses anthropic/claude-haiku-4-5
       provider: "anthropic",
     };
   }
   if (keyFound("OpenAI")) {
     return {
       providerName: "OpenAI",
-      modelOverride: "gpt-5.2",
+      modelOverride: "openai/gpt-5.2",
       provider: "openai",
     };
   }
   if (keyFound("Google")) {
     return {
       providerName: "Gemini",
-      modelOverride: "gemini-2.5-flash",
+      modelOverride: "google/gemini-2.5-flash",
       provider: "google",
     };
   }
@@ -246,13 +246,12 @@ export async function validateApiCredits(
   try {
     const { generateText } = await import("ai");
 
-    // Use the model registry to find the cheapest available model for each
-    // provider, so we don't hardcode model names that rot as providers
-    // deprecate old models. Hardcoded fallbacks are last-resort only.
-    const registry = LlmProviderRegistry.getInstance({ performHealthCheckOnInit: false });
+    // One cheap, long-lived model per provider, in the provider's own
+    // spelling (these go straight to the AI SDK). The wizard runs before any
+    // hank, so there is no loaded model catalog to pick from.
 
     if (provider === "anthropic") {
-      const modelId = registry.findCheapestModel("anthropic") ?? "claude-haiku-4-5";
+      const modelId = "claude-haiku-4-5";
       const { createAnthropic } = await import("@ai-sdk/anthropic");
       const anthropic = createAnthropic({
         apiKey: process.env.ANTHROPIC_API_KEY,
@@ -263,7 +262,7 @@ export async function validateApiCredits(
         prompt: "Hi",
       });
     } else if (provider === "openai") {
-      const modelId = registry.findCheapestModel("openai") ?? "gpt-4o-mini";
+      const modelId = "gpt-4o-mini";
       const { createOpenAI } = await import("@ai-sdk/openai");
       const openai = createOpenAI({ apiKey: process.env.OPENAI_API_KEY });
       await generateText({
@@ -272,7 +271,7 @@ export async function validateApiCredits(
         prompt: "Hi",
       });
     } else if (provider === "google") {
-      const modelId = registry.findCheapestModel("google") ?? "gemini-2.5-flash";
+      const modelId = "gemini-2.5-flash";
       const { createGoogleGenerativeAI } = await import("@ai-sdk/google");
       // @ai-sdk/google's own env default is GOOGLE_GENERATIVE_AI_API_KEY, so
       // the key must be passed explicitly — use the same resolved value

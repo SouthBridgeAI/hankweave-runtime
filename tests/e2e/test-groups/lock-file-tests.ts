@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import type { ChildProcess } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { ExecutionLayout } from "../../../server/execution-layout.js";
 
 interface TestState {
   serverProcess: ChildProcess | null;
@@ -9,35 +10,17 @@ interface TestState {
 }
 
 export function runLockFileTests(testState: TestState, testDir: string) {
-  test("lock file PID matches server process", () => {
-    const lockFile = path.join(testDir, ".hankweave/runtime.lock");
-    if (fs.existsSync(lockFile) && testState.serverProcess?.pid) {
-      const lockContent = fs.readFileSync(lockFile, "utf-8");
-
-      // The lock file is now JSON format with { pid, runId, startTime, lastHeartbeat }
-      try {
-        const lockData = JSON.parse(lockContent);
-        const lockPid = lockData.pid;
-
-        // For running server, should match
-        if (!testState.serverExited) {
-          expect(lockPid).toBe(testState.serverProcess.pid);
-        }
-      } catch (_error) {
-        // Old format - just PID
-        const lockPid = parseInt(lockContent.trim());
-        if (!testState.serverExited) {
-          expect(lockPid).toBe(testState.serverProcess.pid);
-        }
-      }
-    }
+  test("runtime uses an in-directory lease without a PID marker", () => {
+    expect(fs.existsSync(path.join(testDir, ".hankweave/runtime.lock"))).toBe(false);
+    if (fs.existsSync(new ExecutionLayout(testDir).runtimeLockPath))
+      expect(fs.statSync(new ExecutionLayout(testDir).runtimeLockPath).isDirectory()).toBe(true);
   });
 
   test("no stale lock files after shutdown", async () => {
     // This is particularly important for the shutdown test
     if (!testState.serverExited) return;
 
-    const lockFile = path.join(testDir, ".hankweave/runtime.lock");
+    const lockFile = new ExecutionLayout(testDir).runtimeLockPath;
 
     // Was `setTimeout(() => expect(...), 1000)` inside a synchronous test: the
     // test returned before the callback ran, so the assertion could never fail

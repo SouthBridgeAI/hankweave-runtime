@@ -58,6 +58,8 @@ import {
   HankDir,
   type IgnoredEntry,
 } from "../hank-dir.js";
+import { modelHarnesses } from "../harnesses.js";
+import { Models } from "../llm/index.js";
 import {
   compareUtf8,
   normalizeRefField,
@@ -145,7 +147,11 @@ export type LintWarnCategory =
   // (explicit root .gitignore, or the implicit default set — hank-dir.ts).
   // One warn per copy root, never per file: an ignored node_modules would
   // otherwise emit hundreds of thousands of findings.
-  | "ignored-paths";
+  | "ignored-paths"
+  // A `models` entry the model catalog could not use (an unknown basedOn, a
+  // provider the catalog lacks, …). A codon that names the model then fails
+  // as an unknown model; this says why.
+  | "models-block";
 
 export interface LintFinding {
   severity: LintSeverity;
@@ -1337,6 +1343,14 @@ function validateRootSnapshot(walker: ClosureWalker, hankBytes: Buffer): boolean
   }
   walker.raw = raw;
 
+  // Parse mode (spec 72): models are checked by name and by catalog
+  // membership — bundled data, cache, probe results, this hank's own
+  // `models` block, and the harnesses' offline catalogs — with no
+  // credentials and no network. Authors pack without runtime keys.
+  const models = Models.loadForParsing({ hank: raw }, { harnesses: modelHarnesses() });
+  for (const problem of models.problems()) {
+    walker.warn("models-block", "models", problem.replace(/^hank\.json models: /, ""));
+  }
   const parsed = hankFileSchema.safeParse(raw);
   if (!parsed.success) {
     walker.error("schema-error", "hank.json", formatZodIssues(parsed.error));

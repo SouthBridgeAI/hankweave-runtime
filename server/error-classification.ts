@@ -377,6 +377,8 @@ export function classifyApiErrorText(
     lower.includes("unauthorized") ||
     lower.includes("forbidden") ||
     lower.includes("api key") ||
+    lower.includes("no credentials") ||
+    lower.includes("no aws credentials") ||
     lower.includes("oauth");
   if (isAuth) {
     return {

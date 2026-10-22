@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { CodonConfig } from "../../server/config.js";
+import type { Codon, CodonConfig } from "../../server/config.js";
 import { computeBudgetWarnings } from "../../server/config.js";
 import { renderBudgetResolutionTable } from "../../server/validate-budget.js";
 
@@ -19,7 +19,7 @@ function makeCodon(
     id,
     name: id,
     model: {
-      modelId: "haiku",
+      modelId: "claude-haiku-4-5",
       name: modelName,
       providerId: "anthropic",
       cost: { input: 0.25, output: 1.25 },
@@ -216,6 +216,43 @@ describe("computeBudgetWarnings", () => {
     const codons = [loop];
     const warnings = computeBudgetWarnings(undefined, codons);
     expect(warnings.some((w) => w.includes("fast") && w.includes("never be reached"))).toBe(false);
+  });
+
+  const withModel = (id: string, model: Record<string, unknown>): CodonConfig => {
+    const codon = makeCodon(id) as Codon;
+    return { ...codon, model: { ...codon.model, ...model } } as CodonConfig;
+  };
+
+  test("W6: a run-wide dollar ceiling covers every codon; an unpriced model warns with its estimate", () => {
+    const codon = withModel("new-model", {
+      cost: undefined,
+      provenance: {
+        confidence: "provisional",
+        source: "anthropic GET /v1/models",
+        priceStatus: "unknown",
+        budgetCost: { input: 3, output: 15 },
+        budgetCostBasis:
+          "ceiling estimate: highest price among 2 claude-sonnet model(s) in anthropic",
+      },
+    });
+    expect(computeBudgetWarnings(undefined, [codon])).toEqual([]);
+    const warnings = computeBudgetWarnings(undefined, [codon], { ceilingMaxDollars: 5 });
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("ceiling estimate of $3/$15 per M");
+  });
+
+  test("W6: an unpriced model without an estimate warns that its cost counts as $0", () => {
+    const codon = withModel("mystery", { cost: undefined });
+    const warnings = computeBudgetWarnings({ maxDollars: 5 }, [codon]);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("its cost counts as $0");
+  });
+
+  test("W6: a model listed at $0 warns that the budget cannot bind on it", () => {
+    const codon = withModel("free", { cost: { input: 0, output: 0 } });
+    const warnings = computeBudgetWarnings(undefined, [makeLoop("l", [codon], { maxDollars: 2 })]);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("listed at $0 per token");
   });
 });
 

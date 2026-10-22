@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it, spyOn } from "bun:test";
+import * as childProcess from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -131,10 +132,18 @@ describe("validateCopyTree with the ignore rules", () => {
         fs.writeFileSync(abs, "x");
       }
     }
-    const start = Date.now();
-    expect(hank.validateCopyTree(hank.ref("./tpl"))).toBeNull();
-    // ~51 spawnSync batches at a few ms each; per-FILE spawning (200+)
-    // would blow well past this.
-    expect(Date.now() - start).toBeLessThan(2000);
-  });
+    const spawnSyncSpy = spyOn(childProcess, "spawnSync");
+    try {
+      expect(hank.validateCopyTree(hank.ref("./tpl"))).toBeNull();
+      const checkIgnoreCalls = spawnSyncSpy.mock.calls.filter(
+        ([command, args]) => command === "git" && Array.isArray(args) && args[0] === "check-ignore",
+      );
+      // One root verdict + one batch for tpl + one per child directory.
+      // Count subprocesses directly: Windows CI spawn latency makes a
+      // wall-clock bound unreliable even when batching works correctly.
+      expect(checkIgnoreCalls).toHaveLength(52);
+    } finally {
+      spawnSyncSpy.mockRestore();
+    }
+  }, 30_000);
 });

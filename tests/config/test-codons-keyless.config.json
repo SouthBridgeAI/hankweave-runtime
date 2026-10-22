@@ -3,28 +3,34 @@
   "meta": {
     "name": "keyless-wiring-test",
     "version": "1.0.0",
-    "description": "For suites that assert server wiring and never run a codon. The pi passthrough model below is real (the startup self-test now verifies models against pi's catalog) but its provider is not credential-enforced, so the self-test passes with no API keys in the environment \u2014 which is what lets these suites live in the keyless offline tier. Never autostart a run against this config: with no DEEPSEEK_API_KEY the codon would fail at spawn."
+    "description": "For suites that assert server wiring and never run a codon. The model is real (startup asks Pi to confirm it against its catalog) and Pi now checks credentials for every provider, so each codon's env block carries a placeholder DEEPSEEK_API_KEY: the check passes with no API keys in the process environment, which is what lets these suites live in the keyless offline tier. Never autostart a run against this config: the placeholder key would fail at the provider."
   },
   "hank": [
     {
       "id": "codon-1",
       "name": "Codon 1: Never Invoked",
       "promptText": "This codon must never run. If you are reading this, a wiring-only test autostarted its config.",
-      "model": "pi/deepseek/deepseek-v4-flash",
+      "model": "pi/deepseek/deepseek-flash",
       "continuationMode": "fresh",
       "checkpointedFiles": [
         "notes/*.txt"
-      ]
+      ],
+      "env": {
+        "DEEPSEEK_API_KEY": "keyless-placeholder-never-sent"
+      }
     },
     {
       "id": "codon-2",
       "name": "Codon 2: Never Invoked",
       "promptText": "This codon must never run either.",
-      "model": "pi/deepseek/deepseek-v4-flash",
+      "model": "pi/deepseek/deepseek-flash",
       "continuationMode": "continue-previous",
       "checkpointedFiles": [
         "notes/*.txt"
-      ]
+      ],
+      "env": {
+        "DEEPSEEK_API_KEY": "keyless-placeholder-never-sent"
+      }
     }
   ]
 }

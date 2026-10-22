@@ -1,10 +1,29 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, spyOn } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { ensureSchemaUrl } from "../../server/config.js";
-import { isNonInteractive, setupExecutionEnvironment } from "../../server/execution-setup.js";
+import { ExecutionLayout } from "../../server/execution-layout.js";
+import {
+  setupExecutionEnvironment as applyExecutionSetup,
+  type ExecutionSetupOptions,
+  isNonInteractive,
+  planExecutionEnvironment,
+  updateExecutionRuntimeMetadata,
+} from "../../server/execution-setup.js";
+import { RuntimeLock } from "../../server/runtime-lock.js";
 import { rimrafSimple } from "../utils/test-helpers.js";
+
+// Test command boundary: resolve the path, acquire once, then apply setup.
+async function setupExecutionEnvironment(options: ExecutionSetupOptions) {
+  const plan = await planExecutionEnvironment(options);
+  const lock = await RuntimeLock.acquire(plan.executionPath);
+  try {
+    return await applyExecutionSetup(plan);
+  } finally {
+    await lock.release();
+  }
+}
 
 describe("Execution Setup - startNew flag", () => {
   const TEST_BASE_DIR = path.join(os.tmpdir(), "hankweave-execution-setup-test");
@@ -48,6 +67,54 @@ describe("Execution Setup - startNew flag", () => {
     );
   });
 
+  it("plans without writing, then keeps one command lease across setup", async () => {
+    const plan = await planExecutionEnvironment({
+      readOnlySourceDataPath: DATA_SOURCE_DIR,
+      startNew: true,
+    });
+    expect(fs.existsSync(plan.executionPath)).toBe(false);
+    expect(fs.existsSync(new ExecutionLayout(plan.executionPath).runtimeLockPath)).toBe(false);
+    const lock = await RuntimeLock.acquire(plan.executionPath);
+    try {
+      const setup = await applyExecutionSetup(plan);
+      expect(setup.executionPath).toBe(plan.executionPath);
+      expect(fs.existsSync(new ExecutionLayout(plan.executionPath).metaPath)).toBe(true);
+      await expect(RuntimeLock.acquire(plan.executionPath)).rejects.toThrow(/in use/);
+    } finally {
+      await lock.release();
+    }
+    const next = await RuntimeLock.acquire(plan.executionPath);
+    await next.release();
+  });
+
+  it("fresh setup ignores its own lease and forced setup preserves it across state backup", async () => {
+    const options = {
+      readOnlySourceDataPath: DATA_SOURCE_DIR,
+      executionPath: EXECUTION_DIR,
+      startNew: true,
+      headless: true,
+    };
+    const plan = await planExecutionEnvironment(options);
+    const lock = await RuntimeLock.acquire(plan.executionPath);
+    const layout = new ExecutionLayout(plan.executionPath);
+    try {
+      // A lock-only directory must not trigger nonempty-directory confirmation.
+      await applyExecutionSetup(plan);
+      const lease = fs.statSync(layout.runtimeLockPath);
+      await applyExecutionSetup({ ...plan, options: { ...options, forceMode: true } });
+      expect(fs.statSync(layout.runtimeLockPath).ino).toBe(lease.ino);
+      await expect(RuntimeLock.acquire(plan.executionPath)).rejects.toThrow(/in use/);
+      const backup = fs.readdirSync(plan.executionPath).find(ExecutionLayout.isStateBackupDir);
+      expect(backup).toBeDefined();
+      if (!backup) throw new Error("Missing state backup");
+      expect(
+        fs.existsSync(path.join(plan.executionPath, backup, ExecutionLayout.RUNTIME_LOCK)),
+      ).toBe(false);
+    } finally {
+      await lock.release();
+    }
+  });
+
   afterEach(async () => {
     // Calculate data hash before deleting test directory
     let dataHash = "";
@@ -73,6 +140,21 @@ describe("Execution Setup - startNew flag", () => {
   });
 
   describe("with explicit execution path", () => {
+    it.each([false, true])("rejects contention before setup writes (force: %s)", async (force) => {
+      const options = { readOnlySourceDataPath: DATA_SOURCE_DIR, executionPath: EXECUTION_DIR };
+      await setupExecutionEnvironment(options);
+      const lock = await RuntimeLock.acquire(EXECUTION_DIR);
+      const before = fs.readFileSync(new ExecutionLayout(EXECUTION_DIR).metaPath, "utf8");
+      try {
+        await expect(
+          setupExecutionEnvironment({ ...options, startNew: force, forceMode: force }),
+        ).rejects.toThrow(/in use/);
+        expect(fs.readFileSync(new ExecutionLayout(EXECUTION_DIR).metaPath, "utf8")).toBe(before);
+      } finally {
+        await lock.release();
+      }
+    });
+
     it("should create new execution in non-existent directory with --start-new", async () => {
       const result = await setupExecutionEnvironment({
         readOnlySourceDataPath: DATA_SOURCE_DIR,
@@ -1022,5 +1104,70 @@ describe("Execution Setup - startNew flag", () => {
       expect(isNonInteractive({ ...interactiveInputs, stdin: { isTTY: undefined } })).toBe(true);
       expect(isNonInteractive({ ...interactiveInputs, stdout: { isTTY: undefined } })).toBe(true);
     });
+  });
+});
+
+describe("execution metadata runtime ports", () => {
+  let dir: string;
+  let layout: ExecutionLayout;
+  let lock: RuntimeLock;
+  const identity = {
+    version: "1.2.0",
+    createdAt: "original",
+    hankPath: "/hank",
+    extra: { keep: true },
+  };
+  beforeEach(async () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "execution-runtime-meta-"));
+    layout = new ExecutionLayout(dir);
+    fs.mkdirSync(layout.stateDir);
+    fs.writeFileSync(layout.metaPath, JSON.stringify(identity));
+    lock = await RuntimeLock.acquire(dir);
+  });
+  afterEach(async () => {
+    await lock.release();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  const read = () => JSON.parse(fs.readFileSync(layout.metaPath, "utf8"));
+
+  it("preserves identity when publishing and clearing ports without renewing the lease", () => {
+    const leaseTime = fs.statSync(new ExecutionLayout(dir).runtimeLockPath).mtimeMs;
+    updateExecutionRuntimeMetadata(dir, { port: 8080, proxyPort: 8081 });
+    expect(read()).toEqual({ ...identity, runtime: { port: 8080, proxyPort: 8081 } });
+    updateExecutionRuntimeMetadata(dir, { port: 9000 });
+    expect(read()).toEqual({ ...identity, runtime: { port: 9000 } });
+    updateExecutionRuntimeMetadata(dir, undefined);
+    expect(read()).toEqual(identity);
+    expect(fs.statSync(new ExecutionLayout(dir).runtimeLockPath).mtimeMs).toBe(leaseTime);
+  });
+
+  it("failed publication preserves the original metadata and cleans up the temporary file", () => {
+    const original = fs.readFileSync(layout.metaPath, "utf8");
+    const rename = spyOn(fs, "renameSync").mockImplementation(() => {
+      throw new Error("ENOSPC");
+    });
+    try {
+      expect(() => updateExecutionRuntimeMetadata(dir, { port: 8080 })).toThrow("ENOSPC");
+    } finally {
+      rename.mockRestore();
+    }
+    expect(fs.readFileSync(layout.metaPath, "utf8")).toBe(original);
+    expect(fs.readdirSync(layout.stateDir)).toEqual([ExecutionLayout.EXECUTION_META_FILE]);
+  });
+
+  it("does not overwrite invalid execution metadata", () => {
+    for (const contents of ["invalid", "null", "[]", "42"]) {
+      fs.writeFileSync(layout.metaPath, contents);
+      expect(() => updateExecutionRuntimeMetadata(dir, { port: 8080 })).toThrow();
+      expect(fs.readFileSync(layout.metaPath, "utf8")).toBe(contents);
+    }
+  });
+
+  it("supports embedded runtimes without pre-existing metadata", () => {
+    fs.rmSync(layout.metaPath);
+    updateExecutionRuntimeMetadata(dir, undefined);
+    expect(fs.existsSync(layout.metaPath)).toBe(false);
+    updateExecutionRuntimeMetadata(dir, { port: 8080 });
+    expect(read()).toEqual({ runtime: { port: 8080 } });
   });
 });

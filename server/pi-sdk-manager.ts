@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import type { Api, Model } from "@earendil-works/pi-ai";
 import { setBedrockProviderModule } from "@earendil-works/pi-ai/api/bedrock-converse-stream.lazy";
 import { bedrockProviderModule } from "@earendil-works/pi-ai/bedrock-provider";
 import { registerBunOAuthFlows } from "@earendil-works/pi-ai/bun-oauth";
@@ -11,7 +12,7 @@ import {
   createBashToolDefinition,
   DEFAULT_COMPACTION_SETTINGS,
   DefaultResourceLoader,
-  ModelRuntime,
+  type ModelRuntime,
   VERSION as PI_VERSION,
   SessionManager,
   SettingsManager,
@@ -21,6 +22,15 @@ import { BaseProcessManager } from "./base-process-manager.js";
 import type { ClaudeLogParser } from "./claude-log-parser.js";
 import { ExecutionLayout } from "./execution-layout.js";
 import { HANKWEAVE_ENV_UNSET, hankweaveEnvEntries } from "./hankweave-env.js";
+import { readUserModelsJson } from "./harness/pi/routing.js";
+import { effortBase, type HarnessCheckResult, type HarnessCheckStep } from "./llm/index.js";
+import { isModelCatalogOffline } from "./model-catalog-settings.js";
+import {
+  createPiModelRuntime,
+  freezePiModelsStore,
+  injectPiModel,
+  refreshPiProvider,
+} from "./pi-model-catalog.js";
 import {
   ensurePublicToolId,
   makeAssistantMessage,
@@ -34,7 +44,8 @@ import {
   serializeToolResultContent,
 } from "./pi-translation.js";
 import { PromptBuilder } from "./prompt-builder.js";
-import { AMAZON_BEDROCK_PROVIDER_ID, toPiTarget } from "./provider-ids.js";
+import { AMAZON_BEDROCK_PROVIDER_ID, pricingProviderId, toPiTarget } from "./provider-ids.js";
+import { RuntimeLock } from "./runtime-lock.js";
 import type { Codon, ShimSelfTestResult } from "./types/types.js";
 import { IdleTimeoutError, type Logger, toError } from "./utils.js";
 
@@ -56,6 +67,8 @@ registerBunOAuthFlows();
 // register the statically imported module; with node_modules present the
 // override is the same module the lazy path would load.
 setBedrockProviderModule(bedrockProviderModule);
+
+export { PI_VERSION };
 
 /** Pi tools the in-process session is allowed to use. */
 const PI_TOOLS = ["read", "bash", "edit", "write", "grep", "find", "ls"];
@@ -88,10 +101,10 @@ interface ProviderCredentialConfig {
 }
 
 /**
- * Env vars that supply per-provider credentials to the embedded Pi SDK.
- * Mirrors the pi runtime's provider catalog; providers not listed here (e.g.
- * ones the user configured directly in pi's own credential store) are let
- * through without enforcement.
+ * Env vars whose keys hankweave hands the embedded Pi SDK as runtime keys
+ * (they then take precedence over pi's on-disk credential store). Not a
+ * credential gate: whether a provider has credentials is pi's own answer
+ * (ModelRuntime.checkAuth), for every provider — see checkPiModel.
  */
 const PROVIDER_CREDENTIALS: Record<string, ProviderCredentialConfig> = {
   anthropic: {
@@ -188,18 +201,20 @@ export function applyEnvOverlay(base: NodeJS.ProcessEnv, overlay: EnvOverlay): N
 }
 
 /**
- * pi ≥0.80.8 replaced the synchronous AuthStorage/ModelRegistry pair with the
- * async ModelRuntime facade. Runtime API keys are an in-memory overlay on top
- * of the runtime's credential store, so env-provided keys take precedence over
- * anything on disk while still letting pi's dynamic provider catalogs refresh.
- * `runtime` is a test seam: production callers let it default to a fresh
- * ModelRuntime.create().
+ * A trimmed key value present in the effective env but not, with the same
+ * value, in the real process.env — i.e. one only the codon env supplies.
  */
-export async function configureModelRuntime(
-  env: NodeJS.ProcessEnv = process.env,
-  runtime?: ModelRuntime,
-): Promise<ModelRuntime> {
-  const modelRuntime = runtime ?? (await ModelRuntime.create());
+function codonOnlyEnvValue(env: NodeJS.ProcessEnv, name: string): string | undefined {
+  const value = env[name]?.trim();
+  if (!value || process.env[name]?.trim() === value) return undefined;
+  return value;
+}
+
+/** Hand hankweave's own credential env vars to the runtime; returns their provider ids. */
+async function setHankweaveProviderKeys(
+  modelRuntime: ModelRuntime,
+  env: NodeJS.ProcessEnv,
+): Promise<Set<string>> {
   const enforcedProviders = new Set<string>();
   for (const config of Object.values(PROVIDER_CREDENTIALS)) {
     enforcedProviders.add(config.runtimeProvider);
@@ -208,55 +223,103 @@ export async function configureModelRuntime(
       await modelRuntime.setRuntimeApiKey(config.runtimeProvider, value);
     }
   }
-  // Pi resolves every OTHER provider's key itself (deepseek, groq, xai, …) —
-  // but from the real process.env. A key that exists only in the effective
-  // codon env (codon.env / HANKWEAVE_-prefixed pass-through) must be injected
-  // as a runtime key or the in-process session never sees it; the removed
-  // shim's child process inherited these naturally. getProviders() is the full
-  // composed catalog (built-ins + models.json config + extension-registered);
-  // getRegisteredProviderIds() covers only extension registrations, which is
-  // empty here (noExtensions) and would skip every built-in. Injection is
-  // limited to values that differ from process.env so pi's own precedence
-  // between env keys and its on-disk credential store is otherwise untouched.
-  // findEnvKeys reports only real API-key vars (never OAuth tokens or ambient
-  // AWS/ADC credentials), so the injected value is always a genuine API key.
+  return enforcedProviders;
+}
+
+/**
+ * Pi resolves every OTHER provider's key itself (deepseek, groq, xai, …) —
+ * but from the real process.env. A key that exists only in the effective
+ * codon env (codon.env / HANKWEAVE_-prefixed pass-through) must be injected
+ * as a runtime key or the in-process session never sees it; the removed
+ * shim's child process inherited these naturally. getProviders() is the full
+ * composed catalog (built-ins + models.json config + extension-registered);
+ * getRegisteredProviderIds() covers only extension registrations, which is
+ * empty here (noExtensions) and would skip every built-in. Injection is
+ * limited to values that differ from process.env so pi's own precedence
+ * between env keys and its on-disk credential store is otherwise untouched.
+ * findEnvKeys reports only real API-key vars (never OAuth tokens or ambient
+ * AWS/ADC credentials), so the injected value is always a genuine API key.
+ */
+async function setCodonEnvProviderKeys(
+  modelRuntime: ModelRuntime,
+  env: NodeJS.ProcessEnv,
+  enforcedProviders: ReadonlySet<string>,
+): Promise<void> {
   for (const { id: providerId } of modelRuntime.getProviders()) {
     if (enforcedProviders.has(providerId)) continue;
     const envVar = findEnvKeys(providerId, env as Record<string, string>)?.[0];
-    if (!envVar) continue;
-    const value = env[envVar]?.trim();
-    if (!value || process.env[envVar]?.trim() === value) continue;
+    const value = envVar ? codonOnlyEnvValue(env, envVar) : undefined;
+    if (!value) continue;
     await modelRuntime.setRuntimeApiKey(providerId, value);
   }
+}
+
+/** The user's models.json provider blocks; none when it is missing or invalid. */
+function userModelsProviders(): Record<string, unknown> {
+  const user = readUserModelsJson();
+  return user && user !== "invalid" ? (user.providers ?? {}) : {};
+}
+
+/** The env var a models.json apiKey of the form "$NAME" or "${NAME}" names. */
+function apiKeyTemplateVar(apiKey: unknown): string | undefined {
+  if (typeof apiKey !== "string") return undefined;
+  const template = /^\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))$/.exec(apiKey);
+  return template?.[1] ?? template?.[2];
+}
+
+/**
+ * Providers the user's models.json defines name their key as "$NAME" or
+ * "${NAME}", which pi interpolates from process.env only; a key the codon
+ * supplies in its env block is handed over the same way as above.
+ */
+async function setUserModelsProviderKeys(
+  modelRuntime: ModelRuntime,
+  env: NodeJS.ProcessEnv,
+): Promise<void> {
+  for (const [providerId, config] of Object.entries(userModelsProviders())) {
+    const name = apiKeyTemplateVar((config as { apiKey?: unknown }).apiKey);
+    const value = name ? codonOnlyEnvValue(env, name) : undefined;
+    if (!value) continue;
+    await modelRuntime.setRuntimeApiKey(providerId, value);
+  }
+}
+
+/**
+ * pi ≥0.80.8 replaced the synchronous AuthStorage/ModelRegistry pair with the
+ * async ModelRuntime facade. Runtime API keys are an in-memory overlay on top
+ * of the runtime's credential store, so env-provided keys take precedence over
+ * anything on disk. The runtime reads hankweave-owned catalog inputs (see
+ * pi-model-catalog.ts) and never touches the network itself. `runtime` is a
+ * test seam: production callers let it default to createPiModelRuntime().
+ */
+export async function configureModelRuntime(
+  env: NodeJS.ProcessEnv = process.env,
+  runtime?: ModelRuntime,
+): Promise<ModelRuntime> {
+  const modelRuntime = runtime ?? (await createPiModelRuntime());
+  const enforcedProviders = await setHankweaveProviderKeys(modelRuntime, env);
+  await setCodonEnvProviderKeys(modelRuntime, env, enforcedProviders);
+  await setUserModelsProviderKeys(modelRuntime, env);
   return modelRuntime;
 }
 
-const MODEL_SHORTNAMES: Record<string, string> = {
-  sonnet: "anthropic/claude-sonnet-4-6",
-  haiku: "anthropic/claude-haiku-4-5",
-  opus: "anthropic/claude-opus-4-7",
-};
-
+/**
+ * Split a pi routing string ("<provider>/<model>", from toPiTarget) into its
+ * parts. A string without a provider has an empty one: nothing is inferred.
+ */
 export function resolveModelIdentifier(input: string): {
   provider: string;
   modelId: string;
   resolved: string;
 } {
-  const trimmed = input.trim();
-  const mapped = MODEL_SHORTNAMES[trimmed.toLowerCase()] ?? trimmed;
-
-  if (mapped.includes("/")) {
-    const [provider, ...rest] = mapped.split("/");
-    return { provider, modelId: rest.join("/"), resolved: mapped };
-  }
-  if (mapped.startsWith("gemini-")) {
-    return { provider: "google", modelId: mapped, resolved: `google/${mapped}` };
-  }
-  if (mapped.startsWith("gpt-") || mapped.startsWith("o1") || mapped.startsWith("o3")) {
-    return { provider: "openai", modelId: mapped, resolved: `openai/${mapped}` };
-  }
-  // Bare claude-* etc. default to anthropic.
-  return { provider: "anthropic", modelId: mapped, resolved: `anthropic/${mapped}` };
+  const mapped = input.trim();
+  const slash = mapped.indexOf("/");
+  if (slash < 0) return { provider: "", modelId: mapped, resolved: mapped };
+  return {
+    provider: mapped.substring(0, slash),
+    modelId: mapped.substring(slash + 1),
+    resolved: mapped,
+  };
 }
 
 /**
@@ -266,24 +329,20 @@ export function resolveModelIdentifier(input: string): {
  * thinkingLevel (the removed codex shim did the same via
  * model_reasoning_effort). Unsuffixed OpenAI models default to high reasoning:
  * pi's default is medium, and migrated hanks expect the shim's high.
- *
- * Shared by spawn and the self-test's model_catalog check so the two can never
- * disagree: pi's catalog is a static vendored snapshot plus
- * ~/.pi/agent/models.json, so a miss at self-test time is deterministically a
- * miss at launch.
  */
 export function lookupPiModel(
   runtime: ModelRuntime,
   provider: string,
   modelId: string,
-): { model: ReturnType<ModelRuntime["getModel"]>; thinkingLevel?: "high" | "xhigh" } {
+): { model: Model<Api> | undefined; thinkingLevel?: "high" | "xhigh" } {
   let model = runtime.getModel(provider, modelId);
   let thinkingLevel: "high" | "xhigh" | undefined;
   if (!model) {
     const effortMatch = /^(.*)-(xhigh|high)$/.exec(modelId);
     if (effortMatch) {
       const base = runtime.getModel(provider, effortMatch[1]);
-      if (base) {
+      // Only a reasoning model has effort levels: "gpt-4o-xhigh" is not gpt-4o.
+      if (base?.reasoning) {
         model = base;
         thinkingLevel = effortMatch[2] as "high" | "xhigh";
       }
@@ -293,12 +352,234 @@ export function lookupPiModel(
   return { model, thinkingLevel };
 }
 
+interface PiModelResolution {
+  runtime: ModelRuntime;
+  model: Model<Api> | undefined;
+  thinkingLevel?: "high" | "xhigh";
+  /** Found only after refreshing the provider from pi.dev. */
+  refreshed: boolean;
+  /** Why pi.dev could not be asked, when the refresh failed. */
+  refreshError?: string;
+}
+
+/**
+ * Configure a runtime and find the route's model: direct lookup, then a
+ * bounded pi.dev refresh of the provider on a miss (when online model checks
+ * are on). Shared by spawn and checkPiModel so the two can never disagree. A
+ * model pi lacks but hankweave's catalog knows was added to this process's
+ * pi catalog when it was checked at startup (Models adoption → injectPiModel).
+ */
+async function resolvePiRuntimeModel(
+  env: NodeJS.ProcessEnv,
+  provider: string,
+  modelId: string,
+  options: { network: boolean; timeoutMs?: number; logger?: Logger; requireAuth?: boolean },
+): Promise<PiModelResolution> {
+  const runtime = await configureModelRuntime(env);
+  // Credentials first, as checkPiModel asks them: a provider with none must
+  // not wait on a pi.dev refresh before failing.
+  if (options.requireAuth && !(await runtime.checkAuth(provider).catch(() => undefined))) {
+    throw new Error(piNoCredentialsMessage(provider));
+  }
+  const found = lookupPiModel(runtime, provider, modelId);
+  if (found.model) return { runtime, ...found, refreshed: false };
+  let refreshError: string | undefined;
+  await refreshPiProvider(runtime, provider, modelId, {
+    ...options,
+    onError: (error) => {
+      refreshError = toError(error).message;
+    },
+  });
+  const after = lookupPiModel(runtime, provider, modelId);
+  return { runtime, ...after, refreshed: after.model !== undefined, refreshError };
+}
+
 /** Cap a catalog id list for an error message: sorted, first 12, "+N more". */
 function formatCatalogSample(ids: readonly string[]): string {
   const sorted = [...ids].sort();
   const shown = sorted.slice(0, 12);
   const rest = sorted.length - shown.length;
   return shown.join(", ") + (rest > 0 ? ` (+${rest} more)` : "");
+}
+
+/** Every env var pi reads an API key for this provider from, API-key names first. */
+function piKeyEnvVars(provider: string): string[] {
+  const everySet = new Proxy({}, { get: () => "set" }) as Record<string, string>;
+  const names = findEnvKeys(provider, everySet) ?? [];
+  return [...names].sort((a, b) => Number(b.endsWith("_API_KEY")) - Number(a.endsWith("_API_KEY")));
+}
+
+const BEDROCK_CREDENTIALS_HELP =
+  "No AWS credentials visible to pi for Bedrock. Quickest: set " +
+  "AWS_BEARER_TOKEN_BEDROCK (AWS Console → Bedrock → API keys → long-term key). " +
+  "Enterprise: set AWS_PROFILE after `aws sso login`, or AWS_ACCESS_KEY_ID + " +
+  "AWS_SECRET_ACCESS_KEY. Also set AWS_REGION. An on-disk default profile or " +
+  "instance role alone is not detected on this route.";
+
+/** Class E for the Pi route: what is missing and where Pi looked. */
+function piNoCredentialsMessage(provider: string): string {
+  if (provider === AMAZON_BEDROCK_PROVIDER_ID) return BEDROCK_CREDENTIALS_HELP;
+  const vars = piKeyEnvVars(provider);
+  const where = "checked the environment, this codon's env block and Pi's auth store";
+  return vars.length > 0
+    ? `No credentials for provider '${provider}' (${where}). Set ${vars.join(" or ")}, or add the key in Pi's auth store.`
+    : `No credentials for provider '${provider}' (${where}). Configure credentials for '${provider}' in Pi's auth store (pi login).`;
+}
+
+/** Pi's catalog row as harness evidence for pricing and limits. */
+function piRow(model: Model<Api>): NonNullable<Extract<HarnessCheckResult, { ok: true }>["row"]> {
+  return {
+    id: model.id,
+    name: model.name,
+    cost: {
+      input: model.cost.input,
+      output: model.cost.output,
+      cache_read: model.cost.cacheRead,
+      cache_write: model.cost.cacheWrite,
+    },
+    limit: { context: model.contextWindow, output: model.maxTokens },
+    reasoning: model.reasoning,
+    input: [...model.input],
+  };
+}
+
+/**
+ * Can Pi run provider/model here, with this environment (spec 72, stage 2)?
+ * In order: Pi's runtime starts (class G otherwise); pi has credentials for
+ * the provider — env, codon env, or its own auth store (class E); pi's
+ * catalog lists the model, after a bounded pi.dev refresh of the provider
+ * when online (class C). Used by PiModelCheck at startup and by
+ * PiSdkManager.runSelfTest.
+ */
+export async function checkPiModel(
+  provider: string,
+  modelId: string,
+  env: NodeJS.ProcessEnv,
+  options: { network: boolean; timeoutMs?: number; logger?: Logger },
+): Promise<HarnessCheckResult> {
+  const steps: HarnessCheckStep[] = [
+    {
+      name: "sdk_installed",
+      passed: true,
+      message: `Pi coding-agent SDK found (version ${PI_VERSION})`,
+    },
+  ];
+  // This run reads its own copy of pi's hosted catalog from here on.
+  freezePiModelsStore(options.logger);
+  let runtime: ModelRuntime;
+  try {
+    runtime = await configureModelRuntime(env);
+  } catch (error) {
+    const message = `Pi's runtime failed to initialize: ${toError(error).message}`;
+    steps.push({ name: "model_runtime", passed: false, message });
+    return { ok: false, kind: "harness-unavailable", message, candidates: [], steps };
+  }
+  steps.push({ name: "model_runtime", passed: true, message: "Pi ModelRuntime initialized" });
+
+  if (!runtime.getProvider(provider)) {
+    const known = runtime.getProviders().map((p) => p.id);
+    const message = `Pi has no provider '${provider}'. Pi's providers: ${formatCatalogSample(known)}.`;
+    steps.push({ name: "authentication", passed: false, message });
+    return { ok: false, kind: "unknown-model", message, candidates: [], steps };
+  }
+  const auth = await runtime.checkAuth(provider).catch(() => undefined);
+  if (!auth) {
+    const message = piNoCredentialsMessage(provider);
+    steps.push({ name: "authentication", passed: false, message });
+    return { ok: false, kind: "no-credentials", message, candidates: [], steps };
+  }
+  steps.push({
+    name: "authentication",
+    passed: true,
+    message: `Credentials for provider '${provider}' via ${auth.source ?? "pi's auth store"}`,
+  });
+
+  const target = `${provider}/${modelId}`;
+  const resolution = await resolvePiRuntimeModel(env, provider, modelId, options);
+  if (!resolution.model && resolution.refreshError) {
+    // Class F: Pi's own catalog lacks it and pi.dev could not be asked.
+    const message =
+      `Could not check '${target}' with Pi: pi.dev did not answer (${resolution.refreshError}). ` +
+      "Fix the network, or run with noOnlineModelChecks to validate from cached catalogs only.";
+    steps.push({ name: "model_catalog", passed: false, message });
+    return { ok: false, kind: "unreachable", message, candidates: [], steps };
+  }
+  if (!resolution.model) {
+    const known = resolution.runtime.getModels(provider).map((m) => m.id);
+    const checked =
+      options.network && !isModelCatalogOffline()
+        ? "its catalog and pi.dev"
+        : "its catalog; online model checks are off";
+    // Pi's ids go out as candidates; Models ranks the closest into the message.
+    const message =
+      `Pi has no model '${target}' (checked ${checked}).` +
+      " A model newer than Pi's catalog that hankweave's catalog lists (models.dev, or a 'models' block entry for a provider the catalog has) is added to Pi's catalog from its newest sibling.";
+    steps.push({ name: "model_catalog", passed: false, message });
+    return {
+      ok: false,
+      kind: "unknown-model",
+      message,
+      candidates: known.map((id) => `${provider}/${id}`),
+      steps,
+    };
+  }
+  const evidence = resolution.refreshed ? "pi.dev" : "pi catalog";
+  steps.push({
+    name: "model_catalog",
+    passed: true,
+    message: `Model '${target}' found in pi's catalog${resolution.refreshed ? " after refreshing it from pi.dev" : ""}`,
+  });
+  return { ok: true, evidence, row: piRow(resolution.model), steps };
+}
+
+/** What spawn resolved for a codon before building its pi session. */
+interface PiSpawnContext {
+  codon: Codon;
+  provider: string;
+  modelId: string;
+  /** The pi routing string, "<provider>/<model>". */
+  resolved: string;
+  envOverlay: EnvOverlay;
+  effectiveEnv: NodeJS.ProcessEnv;
+}
+
+/**
+ * Whether spawn may re-adopt a model record pi's catalog lacks: only a record
+ * the registries or the user vouch for, as at startup. Never for a provider
+ * priced under another (openai-codex as openai): startup never adopts those
+ * either.
+ */
+function isAdoptableRecord(model: Codon["model"], provider: string): boolean {
+  const confidence = model.provenance?.confidence;
+  return (
+    (confidence === "registry" || confidence === "user") && pricingProviderId(provider) === provider
+  );
+}
+
+/**
+ * Custom tools registered via customTools replace same-named built-ins in
+ * pi's tool registry, so this bash tool (with the codon's effective env
+ * overlaid onto pi's shell env — preserving pi's PATH additions) supplants
+ * the built-in one. Without it, agent commands run with the server's
+ * unmodified process env and never see codon.env / HANKWEAVE_ pass-through.
+ * The schema-typed definition doesn't assign to the untyped ToolDefinition
+ * customTools expects (render-callback contravariance); the registry only
+ * consumes it through the untyped interface.
+ */
+function createCodonBashTool(cwd: string, envOverlay: EnvOverlay): ToolDefinition {
+  return createBashToolDefinition(cwd, {
+    spawnHook: (context: BashSpawnContext) => ({
+      ...context,
+      env: applyEnvOverlay(context.env, envOverlay),
+    }),
+  }) as unknown as ToolDefinition;
+}
+
+/** The init message's apiKeySource: hankweave's env var for the provider, if set. */
+function piApiKeySource(provider: string, env: NodeJS.ProcessEnv): string {
+  const config = PROVIDER_CREDENTIALS[provider.toLowerCase()];
+  if (!config) return "none";
+  return getConfiguredEnvValue(config.envVars, env) ? config.apiKeySource : "none";
 }
 
 /**
@@ -310,6 +591,7 @@ function formatCatalogSample(ids: readonly string[]): string {
  */
 export class PiSdkManager extends BaseProcessManager {
   private session: AgentSession | undefined;
+  private unregisterShutdownHook: (() => void) | undefined;
   private logStream: fs.WriteStream | undefined;
   private killed = false;
   private disposed = false;
@@ -380,25 +662,8 @@ export class PiSdkManager extends BaseProcessManager {
     const { logPath, exhaustionPrompt } = options ?? {};
     const isExhaustionMode = !!exhaustionPrompt;
 
-    const actualLogPath =
-      logPath || path.join(this.executionPath, `.hankweave/logs/log-${codon.id}-pi.jsonl`);
-    fs.mkdirSync(path.dirname(actualLogPath), { recursive: true });
-    this.logStream = fs.createWriteStream(
-      actualLogPath,
-      isExhaustionMode ? { flags: "a" } : undefined,
-    );
-
-    this.killed = false;
-    this.disposed = false;
-    this.lastStopReason = undefined;
-    this.lastErrorMessage = undefined;
-    this.activityState = "idle";
-    // usageTotalCostUsd/usageTotals/numTurns are deliberately NOT reset:
-    // exhaustion extensions respawn on the same instance, and the terminal
-    // result's cost/usage must be cumulative because CodonFinalCostSet
-    // OVERWRITES the codon's currentCost with the result's absolute value.
-    this.startedAt = Date.now();
-    this.syntheticPid = 900000 + Math.floor(Math.random() * 99999);
+    const actualLogPath = this.openLogStream(codon, logPath, isExhaustionMode);
+    this.resetForSpawn();
 
     const promptContent = this.promptBuilder.buildPromptForExecution(codon, exhaustionPrompt);
     const resumeId = isExhaustionMode ? sessionToResume : this.resumeIdFor(codon, sessionToResume);
@@ -420,95 +685,187 @@ export class PiSdkManager extends BaseProcessManager {
     // the error-result/exit(1) path — instead of thrown, so the codon's
     // onFailure policy applies (a throw from spawn() escalates as a runner
     // initialization exception that bypasses resolveFailurePolicy).
-    // The pi routing string ("<provider>/<model>", aliases + OpenRouter
-    // re-routing applied) is derived HERE from the model's real identity —
+    // The pi routing string ("<provider>/<model>", the identity as written)
+    // is derived HERE from the model's real identity —
     // late-bound, never persisted — so routing-rule changes apply to resumed
     // plans too.
     const { provider, modelId, resolved } = resolveModelIdentifier(
       toPiTarget(codon.model.providerId, codon.model.modelId),
     );
-    const credentialConfig = PROVIDER_CREDENTIALS[provider.toLowerCase()];
+    const context: PiSpawnContext = {
+      codon,
+      provider,
+      modelId,
+      resolved,
+      envOverlay,
+      effectiveEnv,
+    };
     let session: AgentSession;
     try {
-      if (credentialConfig && !getConfiguredEnvValue(credentialConfig.envVars, effectiveEnv)) {
-        throw new Error(
-          `Missing API key for provider '${provider}'. Set ${credentialConfig.envVars.join(" or ")}.`,
-        );
-      }
-      const modelRuntime = await configureModelRuntime(effectiveEnv);
-      const { model: resolvedModel, thinkingLevel } = lookupPiModel(
-        modelRuntime,
-        provider,
-        modelId,
-      );
-      if (!resolvedModel) {
-        throw new Error(
-          `Pi model not found: ${codon.model.modelId} (provider=${provider}, model=${modelId})`,
-        );
-      }
-
-      // Pi's resource loader needs an agent dir for agent-level config. We disable
-      // all filesystem-discovered resources (extensions/skills/prompts/themes), so
-      // this just needs to be a valid, isolated directory.
-      const agentDir = path.join(this.executionPath, ".hankweave/logs/pi-agent");
-      fs.mkdirSync(agentDir, { recursive: true });
-
-      const systemPrompt = this.promptBuilder.buildSystemPrompt(codon);
-      const resourceLoader = new DefaultResourceLoader({
-        cwd: this.agentRootPath,
-        agentDir,
-        noExtensions: true,
-        noSkills: true,
-        noPromptTemplates: true,
-        noThemes: true,
-        ...(systemPrompt ? { appendSystemPrompt: [systemPrompt] } : {}),
-      });
-      await resourceLoader.reload();
-
-      // Custom tools registered via customTools replace same-named built-ins in
-      // pi's tool registry, so this bash tool (with the codon's effective env
-      // overlaid onto pi's shell env — preserving pi's PATH additions) supplants
-      // the built-in one. Without it, agent commands run with the server's
-      // unmodified process env and never see codon.env / HANKWEAVE_ pass-through.
-      // The schema-typed definition doesn't assign to the untyped ToolDefinition
-      // customTools expects (render-callback contravariance); the registry only
-      // consumes it through the untyped interface.
-      const bashTool = createBashToolDefinition(this.agentRootPath, {
-        spawnHook: (context: BashSpawnContext) => ({
-          ...context,
-          env: applyEnvOverlay(context.env, envOverlay),
-        }),
-      }) as unknown as ToolDefinition;
-
-      // Hermetic per-session settings: pi must NOT read the developer's
-      // ~/.pi/agent/settings.json (compaction, retry, steering...) — two
-      // machines running the same hank would otherwise behave differently.
-      // SettingsManager.inMemory never touches disk. Compaction is gated by
-      // the codon's autoCompact field and is OFF by default: the provider's
-      // context-overflow error must surface (isContextExceeded Pattern 2)
-      // instead of pi silently rewriting the session mid-run. NEVER use
-      // session.setAutoCompactionEnabled() — it persists to the settings
-      // file of the pi config dir (the user's real one in production).
-      const settingsManager = SettingsManager.inMemory({
-        compaction: { ...DEFAULT_COMPACTION_SETTINGS, enabled: codon.autoCompact === true },
-      });
-
-      ({ session } = await createAgentSession({
-        cwd: this.agentRootPath,
-        model: resolvedModel,
-        tools: PI_TOOLS,
-        customTools: [bashTool],
-        sessionManager,
-        settingsManager,
-        modelRuntime,
-        resourceLoader,
-        ...(thinkingLevel ? { thinkingLevel } : {}),
-      }));
+      session = await this.createSession(context, sessionManager);
     } catch (error) {
       this.scheduleSetupFailure(toError(error), resolved);
       return actualLogPath;
     }
+    this.startSession(session, context, resumeId, promptContent);
+    return actualLogPath;
+  }
+
+  /** Open this codon's JSONL log (appending for an exhaustion extension); returns its path. */
+  private openLogStream(
+    codon: Codon,
+    logPath: string | undefined,
+    isExhaustionMode: boolean,
+  ): string {
+    const actualLogPath =
+      logPath || path.join(this.executionPath, `.hankweave/logs/log-${codon.id}-pi.jsonl`);
+    fs.mkdirSync(path.dirname(actualLogPath), { recursive: true });
+    this.logStream = fs.createWriteStream(
+      actualLogPath,
+      isExhaustionMode ? { flags: "a" } : undefined,
+    );
+    return actualLogPath;
+  }
+
+  /** Reset per-turn state before a spawn. */
+  private resetForSpawn(): void {
+    this.killed = false;
+    this.disposed = false;
+    this.lastStopReason = undefined;
+    this.lastErrorMessage = undefined;
+    this.activityState = "idle";
+    // usageTotalCostUsd/usageTotals/numTurns are deliberately NOT reset:
+    // exhaustion extensions respawn on the same instance, and the terminal
+    // result's cost/usage must be cumulative because CodonFinalCostSet
+    // OVERWRITES the codon's currentCost with the result's absolute value.
+    this.startedAt = Date.now();
+    this.syntheticPid = 900000 + Math.floor(Math.random() * 99999);
+  }
+
+  /**
+   * Resolve the codon's model and build its pi session. Throws on any setup
+   * failure; spawn routes those through scheduleSetupFailure.
+   */
+  private async createSession(
+    context: PiSpawnContext,
+    sessionManager: SessionManager,
+  ): Promise<AgentSession> {
+    const { codon } = context;
+    const {
+      runtime: modelRuntime,
+      model: resolvedModel,
+      thinkingLevel,
+    } = await this.resolveSpawnModel(context);
+    const resourceLoader = await this.createResourceLoader(codon);
+    const bashTool = createCodonBashTool(this.agentRootPath, context.envOverlay);
+
+    // Hermetic per-session settings: pi must NOT read the developer's
+    // ~/.pi/agent/settings.json (compaction, retry, steering...) — two
+    // machines running the same hank would otherwise behave differently.
+    // SettingsManager.inMemory never touches disk. Compaction is gated by
+    // the codon's autoCompact field and is OFF by default: the provider's
+    // context-overflow error must surface (isContextExceeded Pattern 2)
+    // instead of pi silently rewriting the session mid-run. NEVER use
+    // session.setAutoCompactionEnabled() — it persists to the settings
+    // file of the pi config dir (the user's real one in production).
+    const settingsManager = SettingsManager.inMemory({
+      compaction: { ...DEFAULT_COMPACTION_SETTINGS, enabled: codon.autoCompact === true },
+    });
+
+    const { session } = await createAgentSession({
+      cwd: this.agentRootPath,
+      model: resolvedModel,
+      tools: PI_TOOLS,
+      customTools: [bashTool],
+      sessionManager,
+      settingsManager,
+      modelRuntime,
+      resourceLoader,
+      ...(thinkingLevel ? { thinkingLevel } : {}),
+    });
+    return session;
+  }
+
+  /**
+   * Find the codon's model in a configured runtime, re-adopting a record pi's
+   * catalog lacks. Throws "Pi model not found" when neither yields it.
+   */
+  private async resolveSpawnModel(
+    context: PiSpawnContext,
+  ): Promise<PiModelResolution & { model: Model<Api> }> {
+    const { codon, provider, modelId, effectiveEnv } = context;
+    const resolveOptions = {
+      network: !isModelCatalogOffline(),
+      logger: this.logger,
+      // Startup confirmed credentials (checkPiModel); asking again here
+      // catches a resumed plan whose provider has none in this env.
+      requireAuth: true,
+    };
+    let resolution = await resolvePiRuntimeModel(effectiveEnv, provider, modelId, resolveOptions);
+    // A resumed plan's model that was adopted into pi's catalog when its
+    // run started lives only in that process's models.json: adopt it again
+    // from the persisted record — the base's, unscaled, for an effort
+    // variant — with a sibling chosen from pi's own models.
+    if (!resolution.model && isAdoptableRecord(codon.model, provider)) {
+      const base = effortBase(codon.model);
+      const injected = injectPiModel(
+        resolution.runtime,
+        provider,
+        base.modelId,
+        base,
+        [],
+        this.logger,
+      );
+      if (injected.ok) {
+        resolution = await resolvePiRuntimeModel(effectiveEnv, provider, modelId, resolveOptions);
+      }
+    }
+    const { model } = resolution;
+    if (!model) {
+      throw new Error(
+        `Pi model not found: ${codon.model.modelId} (provider=${provider}, model=${modelId})`,
+      );
+    }
+    return { ...resolution, model };
+  }
+
+  /** A resource loader with every filesystem-discovered resource disabled. */
+  private async createResourceLoader(codon: Codon): Promise<DefaultResourceLoader> {
+    // Pi's resource loader needs an agent dir for agent-level config. We disable
+    // all filesystem-discovered resources (extensions/skills/prompts/themes), so
+    // this just needs to be a valid, isolated directory.
+    const agentDir = path.join(this.executionPath, ".hankweave/logs/pi-agent");
+    fs.mkdirSync(agentDir, { recursive: true });
+
+    const systemPrompt = this.promptBuilder.buildSystemPrompt(codon);
+    const resourceLoader = new DefaultResourceLoader({
+      cwd: this.agentRootPath,
+      agentDir,
+      noExtensions: true,
+      noSkills: true,
+      noPromptTemplates: true,
+      noThemes: true,
+      ...(systemPrompt ? { appendSystemPrompt: [systemPrompt] } : {}),
+    });
+    await resourceLoader.reload();
+    return resourceLoader;
+  }
+
+  /** Adopt a built session: shutdown hook, init message, event stream, prompt run. */
+  private startSession(
+    session: AgentSession,
+    context: PiSpawnContext,
+    resumeId: string | null,
+    promptContent: string,
+  ): void {
+    const { codon, resolved } = context;
     this.session = session;
+    this.unregisterShutdownHook = RuntimeLock.registerShutdownHook(() => {
+      // Pi aborts its active tool signal before its first await. Bash handles
+      // that signal by killing the detached process group synchronously on POSIX.
+      // Do not call kill()/cleanup(): those parse logs and flush protected files.
+      this.abortSession();
+    });
     this.sessionId = session.sessionId;
 
     this.logger.log(`Starting in-process Pi session for codon ${codon.id} (model: ${resolved})`);
@@ -522,11 +879,7 @@ export class PiSdkManager extends BaseProcessManager {
         cwd: this.agentRootPath,
         model: resolved,
         tools: PI_TOOLS.map(normalizeToolName),
-        apiKeySource: credentialConfig
-          ? getConfiguredEnvValue(credentialConfig.envVars, effectiveEnv)
-            ? credentialConfig.apiKeySource
-            : "none"
-          : "none",
+        apiKeySource: piApiKeySource(context.provider, context.effectiveEnv),
       }),
       false,
     );
@@ -541,8 +894,6 @@ export class PiSdkManager extends BaseProcessManager {
       this.cleanup();
       this.emit("error", toError(error));
     });
-
-    return actualLogPath;
   }
 
   /**
@@ -817,7 +1168,7 @@ export class PiSdkManager extends BaseProcessManager {
 
   private abortSession(): void {
     try {
-      this.session?.abort?.();
+      void this.session?.abort?.()?.catch(() => {});
     } catch {
       // best-effort
     }
@@ -846,6 +1197,8 @@ export class PiSdkManager extends BaseProcessManager {
   private cleanup(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.unregisterShutdownHook?.();
+    this.unregisterShutdownHook = undefined;
     try {
       this.session?.dispose?.();
     } catch {
@@ -893,102 +1246,45 @@ export class PiSdkManager extends BaseProcessManager {
   }
 
   /**
-   * Verify the embedded Pi SDK environment: SDK importable and, when a model id
-   * is given, credentials configured for its provider. Mirrors
-   * ClaudeAgentSDKManager.runSelfTest.
+   * Verify the embedded Pi SDK environment: SDK importable, the runtime
+   * starts, and, when a model id is given, credentials for its provider and
+   * the model in pi's catalog — the same checks startup model validation runs
+   * (checkPiModel).
    */
   async runSelfTest(modelId?: string): Promise<ShimSelfTestResult> {
     this.logger.log("Running Pi SDK self-test", "info");
-    const checks: ShimSelfTestResult["checks"] = [];
     // Self-test has no codon, but the HANKWEAVE_ pass-through still applies —
     // a key supplied only as HANKWEAVE_OPENAI_API_KEY must not fail the check.
     const effectiveEnv = applyEnvOverlay(process.env, buildEnvOverlay());
-
-    // Check 1: the SDK is importable (statically imported — reaching here proves it).
-    checks.push({
-      name: "sdk_installed",
-      passed: true,
-      message: `Pi coding-agent SDK found (version ${PI_VERSION})`,
-    });
-
-    // Check 2: model runtime can be constructed (provider catalogs load).
-    let runtime: ModelRuntime | undefined;
-    try {
-      runtime = await configureModelRuntime(effectiveEnv);
-      checks.push({
-        name: "model_runtime",
-        passed: true,
-        message: "Pi ModelRuntime initialized",
-      });
-    } catch (error) {
-      checks.push({
-        name: "model_runtime",
-        passed: false,
-        message: `Pi ModelRuntime failed to initialize: ${toError(error).message}`,
-      });
-    }
-
-    // Check 3: credentials for the target provider (when known).
+    let checks: ShimSelfTestResult["checks"];
     if (modelId) {
       const { provider, modelId: targetModelId } = resolveModelIdentifier(modelId);
-      const credentialConfig = PROVIDER_CREDENTIALS[provider.toLowerCase()];
-      if (credentialConfig) {
-        const available = !!getConfiguredEnvValue(credentialConfig.envVars, effectiveEnv);
-        checks.push({
-          name: "authentication",
-          passed: available,
-          message: available
-            ? `Credentials configured for provider '${provider}'`
-            : `Missing API key for provider '${provider}'. Set ${credentialConfig.envVars.join(" or ")}.`,
-        });
-      } else if (provider.toLowerCase() === AMAZON_BEDROCK_PROVIDER_ID && runtime) {
-        // pi refuses Bedrock requests outright when its auth resolution finds
-        // nothing ("Provider is not configured: amazon-bedrock"), so run that
-        // same resolution now instead of passing preflight and failing at
-        // first invoke. checkAuth covers pi's credential store plus its
-        // ambient env markers — NOT on-disk config files or IMDS, which pi's
-        // bedrock provider does not consult.
-        const auth = await runtime.checkAuth(AMAZON_BEDROCK_PROVIDER_ID).catch(() => undefined);
-        checks.push({
-          name: "authentication",
-          passed: auth !== undefined,
-          message: auth
-            ? `Bedrock: AWS credentials via ${auth.source ?? "pi credential store"}`
-            : "No AWS credentials visible to pi for Bedrock. Quickest: set " +
-              "AWS_BEARER_TOKEN_BEDROCK (AWS Console → Bedrock → API keys → long-term key). " +
-              "Enterprise: set AWS_PROFILE after `aws sso login`, or AWS_ACCESS_KEY_ID + " +
-              "AWS_SECRET_ACCESS_KEY. Also set AWS_REGION. An on-disk default profile or " +
-              "instance role alone is not detected on this route.",
-        });
-      } else {
-        checks.push({
-          name: "authentication",
+      const result = await checkPiModel(provider, targetModelId, effectiveEnv, {
+        network: !isModelCatalogOffline(),
+        logger: this.logger,
+      });
+      checks = result.steps ?? [];
+    } else {
+      checks = [
+        {
+          name: "sdk_installed",
           passed: true,
-          message: `Provider '${provider}' not credential-enforced; pi resolves credentials itself`,
+          message: `Pi coding-agent SDK found (version ${PI_VERSION})`,
+        },
+      ];
+      try {
+        await configureModelRuntime(effectiveEnv);
+        checks.push({
+          name: "model_runtime",
+          passed: true,
+          message: "Pi ModelRuntime initialized",
         });
-      }
-
-      // Check 4: the target model exists in pi's catalog — the same gate spawn
-      // applies (lookupPiModel), run at startup so a catalog miss surfaces at
-      // config load instead of after earlier codons have already run and spent
-      // money. Stage 1 of validation is the registry (identity/capabilities in
-      // validateModel); this is stage 2, against the catalog that actually
-      // decides pi runnability.
-      if (runtime) {
-        const { model } = lookupPiModel(runtime, provider, targetModelId);
-        let message: string;
-        if (model) {
-          message = `Model '${provider}/${targetModelId}' found in pi's catalog`;
-        } else {
-          const available = runtime.getModels(provider).map((m) => m.id);
-          message =
-            available.length > 0
-              ? `Pi model not found: ${provider}/${targetModelId}. ` +
-                `Available '${provider}' models: ${formatCatalogSample(available)}`
-              : `Unknown pi provider '${provider}'. ` +
-                `Known providers: ${formatCatalogSample(runtime.getProviders().map((p) => p.id))}`;
-        }
-        checks.push({ name: "model_catalog", passed: model !== undefined, message });
+      } catch (error) {
+        checks.push({
+          name: "model_runtime",
+          passed: false,
+          message: `Pi ModelRuntime failed to initialize: ${toError(error).message}`,
+        });
       }
     }
 

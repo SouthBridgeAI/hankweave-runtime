@@ -6,12 +6,8 @@
  * flush, a pending state transition) would leave a run that already detected a
  * fatal condition hanging forever instead of exiting.
  *
- * The bound applies per WINDOW, not to the whole shutdown. The runtime re-arms
- * it (`reset`) after phases that block the event loop — the synchronous trace
- * upload — because a timer cannot fire while the loop is blocked, but an
- * overdue timer fires at the very next await and would kill the following phase
- * (the journal diet) mid-flight. Shutdown is therefore bounded by
- * cleanup ≤ window + upload ≤ its own spawnSync timeout + diet ≤ window.
+ * Cleanup and journal finalization have separate bounded windows. After
+ * ownership release, trace upload uses its own subprocess timeout.
  *
  * Exit-code policy lives in the runtime (it needs run state); this module takes
  * a resolved code. `exit` is injectable so tests never call process.exit.

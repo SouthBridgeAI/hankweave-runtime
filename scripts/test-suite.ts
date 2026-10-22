@@ -564,10 +564,17 @@ export function buildSuiteEnv(
     // but that is a runtime change to make with live verification; polling at
     // 100ms shrinks the tax to 200ms/codon without touching runtime behavior.
     HANKWEAVE_RUNTIME_LOG_PARSING_INTERVAL: "100",
+    // The model catalog never looks models up online under the runner: every
+    // suite resolves models against the bundled data plus its own (empty)
+    // catalog cache, <HANKWEAVE_CACHE_DIR>/model-catalog — runSuite gives each
+    // suite its own HANKWEAVE_CACHE_DIR — so a result cannot depend on what
+    // models.dev published today. Catalog tests exercise the network paths
+    // against local mock servers; a suite can opt back in through its own `env`.
+    HANKWEAVE_RUNTIME_NO_ONLINE_MODEL_CHECKS: "1",
     ...(suite.env ?? {}),
   };
   for (const key of PROVIDER_KEY_ENV_VARS) {
-    // The registry (llm-provider-registry.ts) prefers the HANKWEAVE_SENTINEL_
+    // Sentinel provider health (sentinels/provider-health.ts) prefers the HANKWEAVE_SENTINEL_
     // alias over the bare key, and CI exports both from the same secret — so
     // both forms grant the same provider and both must be stripped together.
     const alias = `HANKWEAVE_SENTINEL_${key}`;

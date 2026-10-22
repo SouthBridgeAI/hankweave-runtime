@@ -6,26 +6,10 @@
  */
 
 import { codonConfigSchema, codonSchema } from "../../server/config.js";
-import { LlmProviderRegistry } from "../../server/llm/llm-provider-registry.js";
 import type { Codon, CodonConfig } from "../../server/types/types.js";
-import { Logger } from "../../server/utils.js";
 
-let registryInitialized = false;
-
-/**
- * Ensures LLMProviderRegistry singleton is initialized for tests.
- * Safe to call multiple times - only initializes once.
- */
-export function ensureRegistryInitialized(): void {
-  if (!registryInitialized) {
-    const mockLogger = new Logger("/dev/null");
-    LlmProviderRegistry.getInstance({
-      logger: mockLogger,
-      performHealthCheckOnInit: false,
-    });
-    registryInitialized = true;
-  }
-}
+// Model spellings are checked by the parse-mode Models instance the test
+// preload (tests/setup/models-preload.ts) installs.
 
 /**
  * Creates a test Codon by parsing through Zod schema.
@@ -38,7 +22,7 @@ export function ensureRegistryInitialized(): void {
  * const codon = createTestCodon({
  *   id: "test-1",
  *   name: "Test Codon",
- *   model: "sonnet",
+ *   model: "anthropic/claude-sonnet-4-5",
  *   continuationMode: "fresh",
  * });
  */
@@ -62,8 +46,6 @@ export function createTestCodon(codonData: {
   shimIdleTimeout?: number;
   budget?: Record<string, unknown>;
 }): Codon {
-  ensureRegistryInitialized();
-
   // Parse through Zod schema to apply transforms
   // The transform guarantees model will be ModelInfo (or parsing will fail)
   return codonSchema.parse(codonData) as Codon;
@@ -86,7 +68,7 @@ export function createTestCodon(codonData: {
  *     {
  *       id: "work",
  *       name: "Work",
- *       model: "sonnet",
+ *       model: "anthropic/claude-sonnet-4-5",
  *       continuationMode: "fresh",
  *       promptText: "Do work",
  *     },
@@ -95,8 +77,6 @@ export function createTestCodon(codonData: {
  * });
  */
 export function createTestConfig(configData: unknown): CodonConfig {
-  ensureRegistryInitialized();
-
   // Parse through Zod schema to apply transforms
   // The transform guarantees models will be ModelInfo (or parsing will fail)
   return codonConfigSchema.parse(configData) as CodonConfig;

@@ -24,9 +24,8 @@ export type {
 // Model Types
 // -------------
 
-// ModelName supports any string to work with different shims (Claude, Gemini, etc.)
-// Known Claude models are preserved for autocomplete
-export type ModelName = "sonnet" | "opus" | (string & {});
+// A model spelling as written in a config: '<provider>/<model>' (spec 72).
+export type ModelName = string;
 
 export type ContinuationMode = "fresh" | "continue-previous";
 
@@ -266,7 +265,6 @@ export interface TokenUsage {
  * - `check`: the harness ran a check and it failed for some other reason.
  * - `unknown`: could not be classified.
  */
-export type SelfTestFailureCategory = "launch" | "auth" | "binary-missing" | "check" | "unknown";
 
 /**
  * Individual check result from a shim's self-test.

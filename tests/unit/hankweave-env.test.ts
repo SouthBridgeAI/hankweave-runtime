@@ -8,6 +8,7 @@ describe("hankweaveEnvEntries", () => {
       HANKWEAVE_ANTHROPIC_BASE_URL: "http://proxy",
       HANKWEAVE_RUNTIME_PORT: "8080",
       HANKWEAVE_SENTINEL_OPENAI_API_KEY: "sk-secret",
+      HANKWEAVE_MODEL_CATALOG_DIR: "/tmp/catalog",
       HANKWEAVE_HTTP_PROXY: HANKWEAVE_ENV_UNSET,
       HANKWEAVE_EMPTY: "",
       HANKWEAVE_MISSING: undefined,

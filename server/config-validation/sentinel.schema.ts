@@ -427,11 +427,13 @@ export const sentinelConfigSchema = z
     // Optional LLM parameters
     llmParams: hankweaveLlmCallParamsSchema.optional(),
 
-    // Required model field - accepts full model IDs (e.g., "anthropic/claude-3-5-sonnet-20241022")
+    // Required model: '<provider>/<model>' for a provider the AI SDK runs.
+    // Checked at startup (spec 72); a wrongly written name fails validation,
+    // a model whose provider has no credentials is skipped.
     model: z
       .string()
       .describe(
-        'The full model ID to use (e.g., "anthropic/claude-3-5-sonnet-20241022", "openai/gpt-4-turbo").',
+        "The model to call, as '<provider>/<model>' for a provider sentinels run on (anthropic, openai, google, groq, deepseek, amazon-bedrock), e.g. 'anthropic/claude-haiku-4-5'.",
       ),
 
     // Optional structured output configuration

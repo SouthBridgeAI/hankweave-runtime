@@ -1,13 +1,9 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import * as codonRunnerModule from "../../server/codon-runner.js";
 import {
-  buildSelfTestGuidance,
-  classifyInBandSelfTest,
   ensureSchemaUrl,
-  formatFailedSelfTest,
   loadCodonSequence,
   loadHankFile,
   loadHankweaveRuntimeEnvVars,
@@ -15,9 +11,9 @@ import {
   validateHank,
 } from "../../server/config";
 import { HankConfigFile } from "../../server/hank-dir.js";
-import { LlmProviderRegistry } from "../../server/llm/llm-provider-registry";
+import { Models } from "../../server/llm/index.js";
 import { CodonId } from "../../server/types/branded-types";
-import type { ModelName, ShimSelfTestResult } from "../../server/types/types";
+import type { ModelName } from "../../server/types/types";
 import { Logger } from "../../server/utils";
 import { captureEnv, restoreEnv } from "../utils/env-test-helpers";
 
@@ -54,32 +50,6 @@ const writeHankConfig = (filePath: string, codons: unknown[]) => {
   fs.writeFileSync(filePath, JSON.stringify(hankFile, null, 2));
 };
 
-const createSelfTestResult = (
-  passed = true,
-  message = passed ? "Synthetic self-test passed" : "Synthetic self-test failed",
-): ShimSelfTestResult => ({
-  shim: {
-    name: "synthetic-shim",
-    version: "1.0.0-test",
-  },
-  agent: {
-    name: "synthetic-agent",
-    version: "1.0.0-test",
-    found: true,
-  },
-  checks: [
-    {
-      name: "synthetic-check",
-      passed,
-      message,
-    },
-  ],
-  overall: {
-    passed,
-    message,
-  },
-});
-
 // -------------
 // Tests
 // -------------
@@ -89,15 +59,6 @@ const createSelfTestResult = (
 // -------------
 
 describe("Model Validation", () => {
-  beforeAll(() => {
-    // Initialize LLM Provider Registry for model validation
-    const mockLogger = new Logger("/dev/null");
-    LlmProviderRegistry.getInstance({
-      logger: mockLogger,
-      performHealthCheckOnInit: false,
-    });
-  });
-
   describe("in codonSchema (transforms to ModelInfo)", () => {
     const tempDir = path.resolve("tests", "test-area", "temp-codon-model-test");
     const configPath = path.join(tempDir, "test-config.json");
@@ -111,8 +72,12 @@ describe("Model Validation", () => {
       cleanup(tempDir);
     });
 
-    test("accepts valid Claude model shortcuts (sonnet, opus, haiku)", () => {
-      const models = ["sonnet", "opus", "haiku"];
+    test("accepts qualified Claude models", () => {
+      const models = [
+        "anthropic/claude-sonnet-4-6",
+        "anthropic/claude-opus-4-6",
+        "anthropic/claude-haiku-4-5",
+      ];
 
       for (const model of models) {
         const config = [
@@ -132,13 +97,49 @@ describe("Model Validation", () => {
         const codon = result[0];
         if (codon.type !== "loop") {
           expect(codon.model).toBeDefined();
-          expect(codon.model.modelId).toContain(model);
+          expect(codon.model.modelId).toBe(model.slice("anthropic/".length));
         }
       }
     });
 
+    test("rejects former model shortcuts (sonnet, opus, haiku)", () => {
+      for (const model of ["sonnet", "opus", "haiku"]) {
+        const config = [
+          {
+            id: "test-codon",
+            name: "Test Codon",
+            model,
+            continuationMode: "fresh" as const,
+            promptText: "Test prompt",
+          },
+        ];
+
+        writeHankConfig(configPath, config);
+        expect(() => loadCodonSequence({ configPath })).toThrow(
+          `'${model}' is not a model id; model shortcuts were removed.`,
+        );
+      }
+    });
+
+    test("rejects a bare model id with no provider", () => {
+      const config = [
+        {
+          id: "test-codon",
+          name: "Test Codon",
+          model: "claude-haiku-4-5",
+          continuationMode: "fresh" as const,
+          promptText: "Test prompt",
+        },
+      ];
+
+      writeHankConfig(configPath, config);
+      expect(() => loadCodonSequence({ configPath })).toThrow(
+        "Model 'claude-haiku-4-5' has no provider.",
+      );
+    });
+
     test("accepts valid Gemini models", () => {
-      const models = ["gemini-2.5-flash"];
+      const models = ["google/gemini-2.5-flash"];
 
       for (const model of models) {
         const config = [
@@ -234,7 +235,11 @@ describe("Model Validation", () => {
     });
 
     test("accepts valid model in overrides", () => {
-      const models = ["sonnet", "opus", "haiku"];
+      const models = [
+        "anthropic/claude-sonnet-4-6",
+        "anthropic/claude-opus-4-6",
+        "anthropic/claude-haiku-4-5",
+      ];
 
       for (const model of models) {
         const hankContent = {
@@ -245,7 +250,7 @@ describe("Model Validation", () => {
             {
               id: "test-codon",
               name: "Test Codon",
-              model: "sonnet" as ModelName,
+              model: "anthropic/claude-sonnet-4-6" as ModelName,
               continuationMode: "fresh" as const,
               promptText: "Test prompt",
             },
@@ -270,7 +275,7 @@ describe("Model Validation", () => {
           {
             id: "test-codon",
             name: "Test Codon",
-            model: "sonnet" as ModelName,
+            model: "anthropic/claude-sonnet-4-6" as ModelName,
             continuationMode: "fresh" as const,
             promptText: "Test prompt",
           },
@@ -291,7 +296,7 @@ describe("Model Validation", () => {
           {
             id: "test-codon",
             name: "Test Codon",
-            model: "sonnet" as ModelName,
+            model: "anthropic/claude-sonnet-4-6" as ModelName,
             continuationMode: "fresh" as const,
             promptText: "Test prompt",
           },
@@ -319,7 +324,12 @@ describe("Model Validation", () => {
     });
 
     test("accepts valid model in runtime config", () => {
-      const models = ["sonnet", "opus", "haiku", "gemini-2.5-flash"];
+      const models = [
+        "anthropic/claude-sonnet-4-6",
+        "anthropic/claude-opus-4-6",
+        "anthropic/claude-haiku-4-5",
+        "google/gemini-2.5-flash",
+      ];
 
       for (const model of models) {
         const runtimeContent = {
@@ -338,7 +348,7 @@ describe("Model Validation", () => {
 
     test("throws error for invalid model in runtime config", () => {
       const runtimeContent = {
-        model: "this is not a model", // Invalid - not in registry
+        model: "this is not a model", // Invalid - not a provider/model id
         port: 8080,
       };
 
@@ -425,7 +435,7 @@ describe("Model Validation", () => {
         {
           id: "test-codon",
           name: "Test Codon",
-          model: "opus",
+          model: "anthropic/claude-opus-4-6",
           continuationMode: "fresh",
           promptText: "Test prompt",
           systemPromptFile: "./system.md", // Wrong field name!
@@ -451,7 +461,7 @@ describe("Model Validation", () => {
         {
           id: "test-codon",
           name: "Test Codon",
-          model: "opus",
+          model: "anthropic/claude-opus-4-6",
           continuationMode: "fresh",
           promptText: "Test prompt",
           trackedFiles: ["*.md"], // Wrong field name!
@@ -476,7 +486,7 @@ describe("Model Validation", () => {
         {
           id: "test-codon",
           name: "Test Codon",
-          model: "opus",
+          model: "anthropic/claude-opus-4-6",
           continuationMode: "fresh",
           promptText: "Test prompt",
           unknownField: "value", // Completely unknown
@@ -509,7 +519,7 @@ describe("Model Validation", () => {
             {
               id: "loop-codon",
               name: "Loop Codon",
-              model: "opus",
+              model: "anthropic/claude-opus-4-6",
               continuationMode: "fresh",
               promptFile: "./prompt.md",
               trackedFiles: ["*.md"], // Wrong! Should be checkpointedFiles
@@ -546,7 +556,7 @@ describe("Model Validation", () => {
             {
               id: "nested-codon",
               name: "Nested Codon",
-              model: "opus",
+              model: "anthropic/claude-opus-4-6",
               continuationMode: "fresh",
               promptFile: "./prompt.md",
               trackedFiles: ["*.md"], // Wrong field name!
@@ -575,7 +585,7 @@ describe("Model Validation", () => {
         {
           id: "multi-unknown",
           name: "Multi Unknown",
-          model: "opus",
+          model: "anthropic/claude-opus-4-6",
           continuationMode: "fresh",
           promptText: "Test prompt",
           unknownFieldOne: "value",
@@ -600,7 +610,7 @@ describe("Model Validation", () => {
         {
           id: "my-codon-id",
           name: "My Codon Name",
-          model: "opus",
+          model: "anthropic/claude-opus-4-6",
           continuationMode: "fresh",
           promptText: "Test",
           systemPromptFile: "./system.md", // Wrong field
@@ -631,7 +641,7 @@ describe("Model Validation", () => {
             {
               id: "loop-codon",
               name: "Loop Codon",
-              model: "opus",
+              model: "anthropic/claude-opus-4-6",
               continuationMode: "fresh",
               promptText: "Test",
             },
@@ -658,7 +668,7 @@ describe("Model Validation", () => {
         {
           id: "test-codon",
           name: "Test Codon",
-          model: "opus",
+          model: "anthropic/claude-opus-4-6",
           continuationMode: "fresh",
           promptText: "Test prompt",
           systemPromptFile: "./system.md", // Wrong field
@@ -687,11 +697,10 @@ describe("validateHank", () => {
   const projectPath = path.join(tempDir, "project");
   let testLogger: Logger;
   let originalEnv: Record<string, string | undefined>;
-  let runSelfTestSpy: ReturnType<typeof spyOn>;
 
   // Set up before each test
   beforeEach(() => {
-    // Capture and set environment variables for self-tests
+    // Capture and set provider environment variables
     originalEnv = captureEnv();
     process.env.ANTHROPIC_API_KEY = "test-anthropic-key";
     process.env.GEMINI_API_KEY = "test-google-key";
@@ -700,22 +709,11 @@ describe("validateHank", () => {
     fs.mkdirSync(tempDir, { recursive: true });
     fs.mkdirSync(projectPath, { recursive: true });
 
-    // Initialize LLM Provider Registry for model validation
-    const mockLogger = new Logger("/dev/null");
-    testLogger = mockLogger;
-    LlmProviderRegistry.getInstance({
-      logger: mockLogger,
-      performHealthCheckOnInit: false,
-    });
-
-    runSelfTestSpy = spyOn(codonRunnerModule.CodonRunner, "runSelfTestForModel");
-    runSelfTestSpy.mockImplementation(async () => createSelfTestResult());
+    testLogger = new Logger("/dev/null");
   });
 
   afterEach(() => {
     cleanup(tempDir);
-    LlmProviderRegistry.resetInstance();
-    runSelfTestSpy.mockRestore();
     // Restore original environment
     restoreEnv(originalEnv);
   });
@@ -727,7 +725,7 @@ describe("validateHank", () => {
       {
         id: "test-codon",
         name: "Test Codon",
-        model: "opus",
+        model: "anthropic/claude-opus-4-6",
         continuationMode: "fresh",
         promptFile: "./prompt.md",
       },
@@ -758,7 +756,7 @@ describe("validateHank", () => {
       {
         id: "codon-1",
         name: "First Codon",
-        model: "opus",
+        model: "anthropic/claude-opus-4-6",
         continuationMode: "fresh",
         promptFile: "./prompt1.md",
         checkpointedFiles: ["*.md"],
@@ -766,7 +764,7 @@ describe("validateHank", () => {
       {
         id: "codon-2",
         name: "Second Codon",
-        model: "opus", // Same model for continue-previous
+        model: "anthropic/claude-opus-4-6", // Same model for continue-previous
         continuationMode: "continue-previous",
         promptFile: "./prompt2.md",
         appendSystemPromptFile: "./system.md",
@@ -805,14 +803,14 @@ describe("validateHank", () => {
       {
         id: "duplicate-id",
         name: "First Codon",
-        model: "opus",
+        model: "anthropic/claude-opus-4-6",
         continuationMode: "fresh",
         promptFile: "./prompt.md",
       },
       {
         id: "duplicate-id",
         name: "Second Codon",
-        model: "sonnet",
+        model: "anthropic/claude-sonnet-4-6",
         continuationMode: "fresh",
         promptFile: "./prompt.md",
       },
@@ -835,14 +833,14 @@ describe("validateHank", () => {
       {
         id: "codon-1",
         name: "Duplicate Name",
-        model: "opus",
+        model: "anthropic/claude-opus-4-6",
         continuationMode: "fresh",
         promptFile: "./prompt.md",
       },
       {
         id: "codon-2",
         name: "Duplicate Name",
-        model: "sonnet",
+        model: "anthropic/claude-sonnet-4-6",
         continuationMode: "fresh",
         promptFile: "./prompt.md",
       },
@@ -866,7 +864,7 @@ describe("validateHank", () => {
       {
         id: "test-codon",
         name: "Test Codon",
-        model: "opus",
+        model: "anthropic/claude-opus-4-6",
         continuationMode: "fresh",
         promptFile: "./empty.md",
       },
@@ -891,7 +889,7 @@ describe("validateHank", () => {
       {
         id: "test-codon",
         name: "Test Codon",
-        model: "opus",
+        model: "anthropic/claude-opus-4-6",
         continuationMode: "fresh",
         promptFile: "./large.md",
       },
@@ -916,7 +914,7 @@ describe("validateHank", () => {
       {
         id: "test-codon",
         name: "Test Codon",
-        model: "opus",
+        model: "anthropic/claude-opus-4-6",
         continuationMode: "fresh",
         promptFile: "./prompt.md",
         rigSetup: [
@@ -952,7 +950,7 @@ describe("validateHank", () => {
       {
         id: "test-codon",
         name: "Test Codon",
-        model: "opus",
+        model: "anthropic/claude-opus-4-6",
         continuationMode: "fresh",
         promptFile: "./prompt.md",
         rigSetup: [
@@ -987,7 +985,7 @@ describe("validateHank", () => {
       {
         id: "test-codon",
         name: "Test Codon",
-        model: "opus",
+        model: "anthropic/claude-opus-4-6",
         continuationMode: "fresh",
         promptFile: "./prompt.md",
         rigSetup: [
@@ -1027,7 +1025,7 @@ describe("validateHank", () => {
       {
         id: "test-codon",
         name: "Test Codon",
-        model: "opus",
+        model: "anthropic/claude-opus-4-6",
         continuationMode: "fresh",
         promptFile: "./prompt.md",
         rigSetup: [{ type: "copy", copy: { from: "./source.txt", to } }],
@@ -1049,7 +1047,7 @@ describe("validateHank", () => {
       {
         id: "test-codon",
         name: "Test Codon",
-        model: "opus",
+        model: "anthropic/claude-opus-4-6",
         continuationMode: "fresh",
         promptFile: "./prompt.md",
         rigSetup: [
@@ -1082,7 +1080,7 @@ describe("validateHank", () => {
       {
         id: "first-codon",
         name: "First Codon",
-        model: "opus",
+        model: "anthropic/claude-opus-4-6",
         continuationMode: "continue-previous", // Invalid for first codon
         promptFile: "./prompt.md",
       },
@@ -1106,7 +1104,7 @@ describe("validateHank", () => {
       {
         id: "codon-1",
         name: "First Codon",
-        model: "opus",
+        model: "anthropic/claude-opus-4-6",
         continuationMode: "fresh",
         promptFile: "./prompt.md",
         // No checkpointedFiles
@@ -1114,7 +1112,7 @@ describe("validateHank", () => {
       {
         id: "codon-2",
         name: "Second Codon",
-        model: "opus", // Same model for continue-previous
+        model: "anthropic/claude-opus-4-6", // Same model for continue-previous
         continuationMode: "continue-previous",
         promptFile: "./prompt.md",
       },
@@ -1147,7 +1145,7 @@ describe("validateHank", () => {
           {
             id: "loop-codon",
             name: "Loop Codon",
-            model: "opus",
+            model: "anthropic/claude-opus-4-6",
             continuationMode: "fresh",
             promptFile: "./prompt.md",
             // No checkpointedFiles - this is the last codon in the loop
@@ -1157,7 +1155,7 @@ describe("validateHank", () => {
       {
         id: "codon-after-loop",
         name: "Codon After Loop",
-        model: "opus", // Same model for continue-previous
+        model: "anthropic/claude-opus-4-6", // Same model for continue-previous
         continuationMode: "continue-previous",
         promptFile: "./prompt.md",
       },
@@ -1185,7 +1183,7 @@ describe("validateHank", () => {
       {
         id: "test-codon",
         name: "Test Codon",
-        model: "opus",
+        model: "anthropic/claude-opus-4-6",
         continuationMode: "fresh",
         promptFile: "./prompt.md",
         rigSetup: [
@@ -1235,7 +1233,7 @@ describe("validateHank", () => {
       {
         id: "standalone-codon",
         name: "Standalone Codon",
-        model: "sonnet",
+        model: "anthropic/claude-sonnet-4-6",
         continuationMode: "fresh",
         promptFile: "./prompt.md",
       },
@@ -1251,14 +1249,14 @@ describe("validateHank", () => {
           {
             id: "loop-codon-1",
             name: "Loop Codon 1",
-            model: "opus",
+            model: "anthropic/claude-opus-4-6",
             continuationMode: "fresh",
             promptFile: "./prompt.md",
           },
           {
             id: "loop-codon-2",
             name: "Loop Codon 2",
-            model: "opus", // Same model for continue-previous
+            model: "anthropic/claude-opus-4-6", // Same model for continue-previous
             continuationMode: "continue-previous",
             promptFile: "./prompt.md",
           },
@@ -1267,7 +1265,7 @@ describe("validateHank", () => {
       {
         id: "final-codon",
         name: "Final Codon",
-        model: "opus", // Match last codon in loop
+        model: "anthropic/claude-opus-4-6", // Match last codon in loop
         continuationMode: "continue-previous",
         promptFile: "./prompt.md",
       },
@@ -1300,14 +1298,14 @@ describe("validateHank", () => {
           {
             id: "duplicate-id", // Same ID
             name: "Codon 1",
-            model: "opus",
+            model: "anthropic/claude-opus-4-6",
             continuationMode: "fresh",
             promptFile: "./prompt.md",
           },
           {
             id: "duplicate-id", // Same ID - should fail
             name: "Codon 2",
-            model: "sonnet",
+            model: "anthropic/claude-sonnet-4-6",
             continuationMode: "continue-previous",
             promptFile: "./prompt.md",
           },
@@ -1341,7 +1339,7 @@ describe("validateHank", () => {
           {
             id: "loop-codon",
             name: "Loop Codon",
-            model: "opus",
+            model: "anthropic/claude-opus-4-6",
             continuationMode: "fresh",
             promptFile: "./prompt.md",
           },
@@ -1350,7 +1348,7 @@ describe("validateHank", () => {
       {
         id: "shared-id", // Codon has same ID as loop - should fail
         name: "Conflicting Codon",
-        model: "sonnet",
+        model: "anthropic/claude-sonnet-4-6",
         continuationMode: "fresh",
         promptFile: "./prompt.md",
       },
@@ -1382,7 +1380,7 @@ describe("validateHank", () => {
           {
             id: "loop-codon",
             name: "Loop Codon",
-            model: "opus",
+            model: "anthropic/claude-opus-4-6",
             continuationMode: "fresh",
             promptFile: "./non-existent.md", // File doesn't exist
           },
@@ -1412,7 +1410,7 @@ describe("validateHank", () => {
           {
             id: "loop-codon",
             name: "Loop Codon",
-            model: "opus",
+            model: "anthropic/claude-opus-4-6",
             continuationMode: "fresh",
             promptFile: "./prompt.md",
             rigSetup: [
@@ -1455,7 +1453,7 @@ describe("validateHank", () => {
           {
             id: "loop-body",
             name: "Loop Body",
-            model: "opus",
+            model: "anthropic/claude-opus-4-6",
             continuationMode: "fresh",
             promptFile: "./prompt.md",
             // No onFailure - defaults to "abort"
@@ -1489,7 +1487,7 @@ describe("validateHank", () => {
           {
             id: "loop-body",
             name: "Loop Body",
-            model: "opus",
+            model: "anthropic/claude-opus-4-6",
             continuationMode: "fresh",
             promptFile: "./prompt.md",
             onFailure: "retry",
@@ -1516,7 +1514,7 @@ describe("validateHank", () => {
       {
         id: "top-level",
         name: "Top Level Codon",
-        model: "opus",
+        model: "anthropic/claude-opus-4-6",
         continuationMode: "fresh",
         promptFile: "./prompt.md",
         // No onFailure - defaults to "abort", but top-level codons should not warn
@@ -1548,7 +1546,7 @@ describe("validateHank", () => {
           {
             id: "fresh-codon",
             name: "Fresh Codon",
-            model: "opus",
+            model: "anthropic/claude-opus-4-6",
             continuationMode: "fresh", // This should fail
             promptFile: "./prompt.md",
           },
@@ -1581,14 +1579,14 @@ describe("validateHank", () => {
           {
             id: "continue-codon",
             name: "Continue Codon",
-            model: "opus",
+            model: "anthropic/claude-opus-4-6",
             continuationMode: "continue-previous", // This is OK for first codon
             promptFile: "./prompt.md",
           },
           {
             id: "fresh-codon",
             name: "Fresh Codon",
-            model: "sonnet",
+            model: "anthropic/claude-sonnet-4-6",
             continuationMode: "fresh", // This should fail
             promptFile: "./prompt.md",
           },
@@ -1621,14 +1619,14 @@ describe("validateHank", () => {
           {
             id: "codon-1",
             name: "Codon 1",
-            model: "opus",
+            model: "anthropic/claude-opus-4-6",
             continuationMode: "continue-previous",
             promptFile: "./prompt.md",
           },
           {
             id: "codon-2",
             name: "Codon 2",
-            model: "opus", // Same model for continue-previous
+            model: "anthropic/claude-opus-4-6", // Same model for continue-previous
             continuationMode: "continue-previous",
             promptFile: "./prompt.md",
           },
@@ -1661,7 +1659,7 @@ describe("validateHank", () => {
           {
             id: "loop-codon",
             name: "Loop Codon",
-            model: "opus",
+            model: "anthropic/claude-opus-4-6",
             continuationMode: "continue-previous",
             promptFile: "./prompt.md",
           },
@@ -1670,7 +1668,7 @@ describe("validateHank", () => {
       {
         id: "after-loop",
         name: "After Loop",
-        model: "sonnet",
+        model: "anthropic/claude-sonnet-4-6",
         continuationMode: "continue-previous", // This should fail
         promptFile: "./prompt.md",
       },
@@ -1701,7 +1699,7 @@ describe("validateHank", () => {
           {
             id: "loop-codon",
             name: "Loop Codon",
-            model: "opus",
+            model: "anthropic/claude-opus-4-6",
             continuationMode: "continue-previous",
             promptFile: "./prompt.md",
           },
@@ -1710,7 +1708,7 @@ describe("validateHank", () => {
       {
         id: "after-loop",
         name: "After Loop",
-        model: "sonnet",
+        model: "anthropic/claude-sonnet-4-6",
         continuationMode: "fresh", // This is OK
         promptFile: "./prompt.md",
       },
@@ -1742,7 +1740,7 @@ describe("validateHank", () => {
           {
             id: "fresh-codon",
             name: "Fresh Codon",
-            model: "opus",
+            model: "anthropic/claude-opus-4-6",
             continuationMode: "fresh", // This is OK for iterationLimit
             promptFile: "./prompt.md",
           },
@@ -1767,14 +1765,14 @@ describe("validateHank", () => {
       {
         id: "codon-1",
         name: "First Codon",
-        model: "opus",
+        model: "anthropic/claude-opus-4-6",
         continuationMode: "fresh",
         promptFile: "./prompt.md",
       },
       {
         id: "codon-2",
         name: "Second Codon",
-        model: "sonnet", // Different model
+        model: "anthropic/claude-sonnet-4-6", // Different model
         continuationMode: "fresh", // Fresh mode is OK
         promptFile: "./prompt.md",
       },
@@ -1797,14 +1795,14 @@ describe("validateHank", () => {
       {
         id: "codon-1",
         name: "First Codon",
-        model: "opus",
+        model: "anthropic/claude-opus-4-6",
         continuationMode: "fresh",
         promptFile: "./prompt.md",
       },
       {
         id: "codon-2",
         name: "Second Codon",
-        model: "sonnet", // Different model
+        model: "anthropic/claude-sonnet-4-6", // Different model
         continuationMode: "continue-previous", // This should fail
         promptFile: "./prompt.md",
       },
@@ -1836,7 +1834,7 @@ describe("validateHank", () => {
           {
             id: "loop-codon",
             name: "Loop Codon",
-            model: "opus", // Loop uses opus
+            model: "anthropic/claude-opus-4-6", // Loop uses opus
             continuationMode: "fresh",
             promptFile: "./prompt.md",
           },
@@ -1845,7 +1843,7 @@ describe("validateHank", () => {
       {
         id: "after-loop",
         name: "After Loop",
-        model: "sonnet", // Different model
+        model: "anthropic/claude-sonnet-4-6", // Different model
         continuationMode: "continue-previous", // This should fail
         promptFile: "./prompt.md",
       },
@@ -1877,14 +1875,14 @@ describe("validateHank", () => {
           {
             id: "loop-codon-1",
             name: "Loop Codon 1",
-            model: "haiku",
+            model: "anthropic/claude-haiku-4-5",
             continuationMode: "fresh",
             promptFile: "./prompt.md",
           },
           {
             id: "loop-codon-2",
             name: "Loop Codon 2",
-            model: "opus", // Last codon in loop uses opus
+            model: "anthropic/claude-opus-4-6", // Last codon in loop uses opus
             continuationMode: "continue-previous",
             promptFile: "./prompt.md",
           },
@@ -1893,7 +1891,7 @@ describe("validateHank", () => {
       {
         id: "after-loop",
         name: "After Loop",
-        model: "sonnet", // Different from last codon in loop
+        model: "anthropic/claude-sonnet-4-6", // Different from last codon in loop
         continuationMode: "continue-previous", // This should fail
         promptFile: "./prompt.md",
       },
@@ -1925,14 +1923,14 @@ describe("validateHank", () => {
           {
             id: "loop-codon-1",
             name: "Loop Codon 1",
-            model: "haiku",
+            model: "anthropic/claude-haiku-4-5",
             continuationMode: "fresh",
             promptFile: "./prompt.md",
           },
           {
             id: "loop-codon-2",
             name: "Loop Codon 2",
-            model: "opus", // Different model
+            model: "anthropic/claude-opus-4-6", // Different model
             continuationMode: "continue-previous", // This should fail
             promptFile: "./prompt.md",
           },
@@ -1966,14 +1964,14 @@ describe("validateHank", () => {
           {
             id: "loop-codon-1",
             name: "Loop Codon 1",
-            model: "haiku",
+            model: "anthropic/claude-haiku-4-5",
             continuationMode: "fresh",
             promptFile: "./prompt.md",
           },
           {
             id: "loop-codon-2",
             name: "Loop Codon 2",
-            model: "opus", // Different model
+            model: "anthropic/claude-opus-4-6", // Different model
             continuationMode: "fresh", // Fresh mode is OK
             promptFile: "./prompt.md",
           },
@@ -1991,28 +1989,21 @@ describe("validateHank", () => {
     expect(result.codonCount).toBe(2);
   });
 
-  test("runs self-tests for all unique models", async () => {
+  test("reports the installed Models instance's harness checks, not per-model self-tests", async () => {
     createTestFile(path.join(tempDir, "prompt.md"), "Test prompt");
 
     const config = [
       {
         id: "anthropic-codon",
         name: "Anthropic Codon",
-        model: "opus",
+        model: "anthropic/claude-opus-4-6",
         continuationMode: "fresh",
         promptFile: "./prompt.md",
       },
       {
         id: "gemini-codon",
         name: "Gemini Codon",
-        model: "gemini-2.5-flash",
-        continuationMode: "fresh",
-        promptFile: "./prompt.md",
-      },
-      {
-        id: "anthropic-codon-2",
-        name: "Another Anthropic Codon",
-        model: "sonnet", // Different Anthropic model
+        model: "google/gemini-2.5-flash",
         continuationMode: "fresh",
         promptFile: "./prompt.md",
       },
@@ -2025,120 +2016,47 @@ describe("validateHank", () => {
       logger: testLogger,
     });
 
-    // Should have run self-tests
-    expect(result.shimSelfTests).toBeDefined();
-    expect(Array.isArray(result.shimSelfTests)).toBe(true);
+    // Models.load checked every model before parsing; validateHank only
+    // surfaces those reports. The parse-mode preload ran no harness checks.
+    expect(result.shimSelfTests).toEqual(Models.current().harnessReports());
+  });
 
-    // Type guard to ensure shimSelfTests exists
-    if (!result.shimSelfTests) {
-      throw new Error("shimSelfTests should be defined");
-    }
-
-    expect(result.shimSelfTests.length).toBeGreaterThan(0);
-
-    // Should have self-tests for unique models
-    const modelIds = result.shimSelfTests.map((test) => test.modelId);
-    expect(modelIds.length).toBeGreaterThan(0);
-
-    // Each self-test should have required fields
-    for (const test of result.shimSelfTests) {
-      expect(test.modelId).toBeDefined();
-      expect(test.provider).toBeDefined();
-      expect(typeof test.passed).toBe("boolean");
-      expect(test.result).toBeDefined();
-      expect(test.result.shim).toBeDefined();
-      expect(test.result.agent).toBeDefined();
-      expect(Array.isArray(test.result.checks)).toBe(true);
-      expect(test.result.overall).toBeDefined();
-      expect(typeof test.result.overall.passed).toBe("boolean");
-    }
-  }, 90_000); // Must exceed SELF_TEST_TIMEOUT_MS (60s on Windows) + overhead
-
-  test("collects unique models from loops", async () => {
+  test("rejects a sentinel model written without a provider", async () => {
     createTestFile(path.join(tempDir, "prompt.md"), "Test prompt");
 
-    const config = [
-      {
-        type: "loop",
-        id: "test-loop",
-        name: "Test Loop",
-        terminateOn: {
-          type: "iterationLimit",
-          limit: 2,
+    for (const sentinelModel of ["claude-haiku-4-5", "pi/anthropic/claude-haiku-4-5"]) {
+      const config = [
+        {
+          id: "test-codon",
+          name: "Test Codon",
+          model: "anthropic/claude-opus-4-6",
+          continuationMode: "fresh",
+          promptFile: "./prompt.md",
+          sentinels: [
+            {
+              sentinelConfig: {
+                id: "watcher",
+                name: "Watcher",
+                model: sentinelModel,
+                trigger: { type: "event", on: ["assistant.action"] },
+                execution: { strategy: "immediate" },
+                userPromptText: "u",
+              },
+            },
+          ],
         },
-        codons: [
-          {
-            id: "loop-codon-1",
-            name: "Loop Codon 1",
-            model: "opus",
-            continuationMode: "fresh",
-            promptFile: "./prompt.md",
-          },
-          {
-            id: "loop-codon-2",
-            name: "Loop Codon 2",
-            model: "gemini-2.5-flash",
-            continuationMode: "fresh",
-            promptFile: "./prompt.md",
-          },
-        ],
-      },
-      {
-        id: "regular-codon",
-        name: "Regular Codon",
-        model: "opus", // Same as loop-codon-1, should not duplicate
-        continuationMode: "fresh",
-        promptFile: "./prompt.md",
-      },
-    ];
+      ];
 
-    writeHankConfig(configPath, config);
-    const result = await validateHank({
-      configPath,
-      executionPath: projectPath,
-      logger: testLogger,
-    });
-
-    // Should have run self-tests
-    expect(result.shimSelfTests).toBeDefined();
-    expect(Array.isArray(result.shimSelfTests)).toBe(true);
-
-    // Type guard to ensure shimSelfTests exists
-    if (!result.shimSelfTests) {
-      throw new Error("shimSelfTests should be defined");
-    }
-
-    // Should have unique models only (opus should appear once, gemini once)
-    const modelIds = result.shimSelfTests.map((test) => test.modelId);
-    const uniqueModelIds = new Set(modelIds);
-    expect(modelIds.length).toBe(uniqueModelIds.size);
-  }, 90_000); // Must exceed SELF_TEST_TIMEOUT_MS (60s on Windows) + overhead
-
-  test("throws when self-tests fail", async () => {
-    createTestFile(path.join(tempDir, "prompt.md"), "Test prompt");
-    runSelfTestSpy.mockImplementationOnce(async () =>
-      createSelfTestResult(false, "Synthetic self-test failure"),
-    );
-
-    const config = [
-      {
-        id: "test-codon",
-        name: "Test Codon",
-        model: "opus",
-        continuationMode: "fresh",
-        promptFile: "./prompt.md",
-      },
-    ];
-
-    writeHankConfig(configPath, config);
-    await expect(
-      validateHank({
+      writeHankConfig(configPath, config);
+      const validation = validateHank({
         configPath,
         executionPath: projectPath,
         logger: testLogger,
-      }),
-    ).rejects.toThrow("Synthetic self-test failure");
-  }, 90_000); // Must exceed SELF_TEST_TIMEOUT_MS (60s on Windows) + overhead
+      });
+      await expect(validation).rejects.toThrow(`Invalid sentinel model '${sentinelModel}'`);
+      await expect(validation).rejects.toThrow("[ERROR]");
+    }
+  });
 });
 
 describe("loadHankFile", () => {
@@ -2148,18 +2066,10 @@ describe("loadHankFile", () => {
   beforeEach(() => {
     cleanup(tempDir);
     fs.mkdirSync(tempDir, { recursive: true });
-
-    // Initialize LLM Provider Registry for model validation
-    const mockLogger = new Logger("/dev/null");
-    LlmProviderRegistry.getInstance({
-      logger: mockLogger,
-      performHealthCheckOnInit: false,
-    });
   });
 
   afterEach(() => {
     cleanup(tempDir);
-    LlmProviderRegistry.resetInstance();
   });
 
   test("loads valid hank file with all fields", () => {
@@ -2171,7 +2081,7 @@ describe("loadHankFile", () => {
         author: "Test Author",
       },
       overrides: {
-        model: "sonnet" as ModelName,
+        model: "anthropic/claude-sonnet-4-6" as ModelName,
         dataHashTimeLimit: 10000,
         sentinel: {
           enablePersistence: false,
@@ -2183,7 +2093,7 @@ describe("loadHankFile", () => {
         {
           id: "test-codon",
           name: "Test Codon",
-          model: "sonnet" as ModelName,
+          model: "anthropic/claude-sonnet-4-6" as ModelName,
           continuationMode: "fresh" as const,
           promptText: "Test prompt",
         },
@@ -2196,7 +2106,7 @@ describe("loadHankFile", () => {
 
     expect(result.meta).toEqual(hankContent.meta);
     // Check overrides fields (model stays as string)
-    expect(result.overrides?.model).toBe("sonnet");
+    expect(result.overrides?.model).toBe("anthropic/claude-sonnet-4-6");
     expect(result.overrides?.dataHashTimeLimit).toBe(10000);
     expect(result.overrides?.sentinel).toEqual(hankContent.overrides.sentinel);
     expect(result.hank).toHaveLength(1);
@@ -2209,7 +2119,7 @@ describe("loadHankFile", () => {
         {
           id: "test-codon",
           name: "Test Codon",
-          model: "sonnet" as ModelName,
+          model: "anthropic/claude-sonnet-4-6" as ModelName,
           continuationMode: "fresh" as const,
           promptText: "Test prompt",
         },
@@ -2259,7 +2169,7 @@ describe("loadHankFile", () => {
         {
           id: "test-codon",
           name: "Test Codon",
-          model: "sonnet" as ModelName,
+          model: "anthropic/claude-sonnet-4-6" as ModelName,
           continuationMode: "fresh" as const,
           promptText: "Test prompt",
         },
@@ -2279,7 +2189,7 @@ describe("loadHankFile", () => {
         {
           id: "test-codon",
           name: "Test Codon",
-          model: "sonnet" as ModelName,
+          model: "anthropic/claude-sonnet-4-6" as ModelName,
           continuationMode: "fresh" as const,
           promptText: "Test prompt",
         },
@@ -2295,14 +2205,14 @@ describe("loadHankFile", () => {
     // and users get immediate feedback instead of silent failures.
     const hankContent = {
       overrides: {
-        modle: "opus", // Typo! Should be "model"
+        modle: "anthropic/claude-opus-4-6", // Typo! Should be "model"
         dataHashTimeLimit: 10000, // Valid field
       },
       hank: [
         {
           id: "test-codon",
           name: "Test Codon",
-          model: "sonnet" as ModelName,
+          model: "anthropic/claude-sonnet-4-6" as ModelName,
           continuationMode: "fresh" as const,
           promptText: "Test prompt",
         },
@@ -2318,14 +2228,14 @@ describe("loadHankFile", () => {
   test("throws error on multiple typos in overrides", () => {
     const hankContent = {
       overrides: {
-        modle: "opus", // Typo! Should be "model"
+        modle: "anthropic/claude-opus-4-6", // Typo! Should be "model"
         dataHashTimeLimittt: 10000, // Typo! Should be "dataHashTimeLimit"
       },
       hank: [
         {
           id: "test-codon",
           name: "Test Codon",
-          model: "sonnet" as ModelName,
+          model: "anthropic/claude-sonnet-4-6" as ModelName,
           continuationMode: "fresh" as const,
           promptText: "Test prompt",
         },
@@ -2340,7 +2250,7 @@ describe("loadHankFile", () => {
   test("throws error on typos in overrides.sentinel", () => {
     const hankContent = {
       overrides: {
-        model: "opus",
+        model: "anthropic/claude-opus-4-6",
         sentinel: {
           enablePersistence: true,
           healthCheckGracePeriodMsss: 5000, // Typo! Should be "healthCheckGracePeriodMs"
@@ -2350,7 +2260,7 @@ describe("loadHankFile", () => {
         {
           id: "test-codon",
           name: "Test Codon",
-          model: "sonnet" as ModelName,
+          model: "anthropic/claude-sonnet-4-6" as ModelName,
           continuationMode: "fresh" as const,
           promptText: "Test prompt",
         },
@@ -2370,18 +2280,10 @@ describe("loadRuntimeConfig", () => {
   beforeEach(() => {
     cleanup(tempDir);
     fs.mkdirSync(tempDir, { recursive: true });
-
-    // Initialize LLM Provider Registry for model validation
-    const mockLogger = new Logger("/dev/null");
-    LlmProviderRegistry.getInstance({
-      logger: mockLogger,
-      performHealthCheckOnInit: false,
-    });
   });
 
   afterEach(() => {
     cleanup(tempDir);
-    LlmProviderRegistry.resetInstance();
   });
 
   test("returns empty object when file doesn't exist", () => {
@@ -2416,7 +2318,7 @@ describe("loadRuntimeConfig", () => {
       port: 8080,
       autostart: true,
       withoutProxy: false,
-      model: "opus",
+      model: "anthropic/claude-opus-4-6",
       anthropicBaseUrl: "https://api.example.com",
       outputDirectory: "/tmp/output",
       executionBaseDir: "/tmp/executions",
@@ -2436,7 +2338,7 @@ describe("loadRuntimeConfig", () => {
     expect(result.port).toBe(8080);
     expect(result.autostart).toBe(true);
     expect(result.withoutProxy).toBe(false);
-    expect(result.model).toBe("opus");
+    expect(result.model).toBe("anthropic/claude-opus-4-6");
     expect(result.anthropicBaseUrl).toBe("https://api.example.com");
     expect(result.outputDirectory).toBe("/tmp/output");
     expect(result.executionBaseDir).toBe("/tmp/executions");
@@ -2576,7 +2478,7 @@ describe("loadRuntimeConfig", () => {
   test("throws error on typos in runtime config", () => {
     const runtimeContent = {
       port: 8080,
-      modell: "opus", // Typo! Should be "model"
+      modell: "anthropic/claude-opus-4-6", // Typo! Should be "model"
     };
 
     createTestFile(runtimeConfigPath, JSON.stringify(runtimeContent, null, 2));
@@ -2628,10 +2530,10 @@ describe("loadHankweaveRuntimeEnvVars", () => {
   });
 
   test("parses single top-level model env var", () => {
-    process.env.HANKWEAVE_RUNTIME_MODEL = "opus";
+    process.env.HANKWEAVE_RUNTIME_MODEL = "anthropic/claude-opus-4-6";
 
     const result = loadHankweaveRuntimeEnvVars();
-    expect(result.model).toBe("opus");
+    expect(result.model).toBe("anthropic/claude-opus-4-6");
   });
 
   test("parses boolean autostart env var (true)", () => {
@@ -2664,13 +2566,13 @@ describe("loadHankweaveRuntimeEnvVars", () => {
 
   test("parses multiple top-level env vars", () => {
     process.env.HANKWEAVE_RUNTIME_PORT = "9000";
-    process.env.HANKWEAVE_RUNTIME_MODEL = "sonnet";
+    process.env.HANKWEAVE_RUNTIME_MODEL = "anthropic/claude-sonnet-4-6";
     process.env.HANKWEAVE_RUNTIME_AUTOSTART = "true";
     process.env.HANKWEAVE_RUNTIME_WITHOUT_PROXY = "false";
 
     const result = loadHankweaveRuntimeEnvVars();
     expect(result.port).toBe(9000);
-    expect(result.model).toBe("sonnet");
+    expect(result.model).toBe("anthropic/claude-sonnet-4-6");
     expect(result.autostart).toBe(true);
     expect(result.withoutProxy).toBe(false);
   });
@@ -2706,13 +2608,13 @@ describe("loadHankweaveRuntimeEnvVars", () => {
 
   test("parses mix of top-level and nested env vars", () => {
     process.env.HANKWEAVE_RUNTIME_PORT = "8080";
-    process.env.HANKWEAVE_RUNTIME_MODEL = "opus";
+    process.env.HANKWEAVE_RUNTIME_MODEL = "anthropic/claude-opus-4-6";
     process.env.HANKWEAVE_RUNTIME_SENTINEL_ENABLE_PERSISTENCE = "true";
     process.env.HANKWEAVE_RUNTIME_SENTINEL_HEALTH_CHECK_GRACE_PERIOD_MS = "3000";
 
     const result = loadHankweaveRuntimeEnvVars();
     expect(result.port).toBe(8080);
-    expect(result.model).toBe("opus");
+    expect(result.model).toBe("anthropic/claude-opus-4-6");
     expect(result.sentinel).toEqual({
       enablePersistence: true,
       healthCheckGracePeriodMs: 3000,
@@ -2803,7 +2705,7 @@ describe("loadHankweaveRuntimeEnvVars", () => {
     process.env.HANKWEAVE_RUNTIME_PORT = "8080";
     process.env.HANKWEAVE_RUNTIME_AUTOSTART = "true";
     process.env.HANKWEAVE_RUNTIME_WITHOUT_PROXY = "false";
-    process.env.HANKWEAVE_RUNTIME_MODEL = "opus";
+    process.env.HANKWEAVE_RUNTIME_MODEL = "anthropic/claude-opus-4-6";
     process.env.HANKWEAVE_RUNTIME_ANTHROPIC_BASE_URL = "https://api.example.com";
     process.env.HANKWEAVE_RUNTIME_OUTPUT_DIRECTORY = "/tmp/output";
     process.env.HANKWEAVE_RUNTIME_EXECUTION_BASE_DIR = "/tmp/executions";
@@ -2818,7 +2720,7 @@ describe("loadHankweaveRuntimeEnvVars", () => {
     expect(result.port).toBe(8080);
     expect(result.autostart).toBe(true);
     expect(result.withoutProxy).toBe(false);
-    expect(result.model).toBe("opus");
+    expect(result.model).toBe("anthropic/claude-opus-4-6");
     expect(result.anthropicBaseUrl).toBe("https://api.example.com");
     expect(result.outputDirectory).toBe("/tmp/output");
     expect(result.executionBaseDir).toBe("/tmp/executions");
@@ -2840,18 +2742,10 @@ describe("loadCodonSequence", () => {
   beforeEach(() => {
     cleanup(tempDir);
     fs.mkdirSync(tempDir, { recursive: true });
-
-    // Initialize LLM Provider Registry for model validation
-    const mockLogger = new Logger("/dev/null");
-    LlmProviderRegistry.getInstance({
-      logger: mockLogger,
-      performHealthCheckOnInit: false,
-    });
   });
 
   afterEach(() => {
     cleanup(tempDir);
-    LlmProviderRegistry.resetInstance();
   });
 
   test("loads valid configuration", () => {
@@ -2860,7 +2754,7 @@ describe("loadCodonSequence", () => {
       {
         id: "test-codon",
         name: "Test Codon",
-        model: "opus",
+        model: "anthropic/claude-opus-4-6",
         continuationMode: "fresh",
         promptText: "Test prompt",
       },
@@ -2880,7 +2774,7 @@ describe("loadCodonSequence", () => {
     expect(codon.continuationMode).toBe("fresh");
     // Check that model was transformed and validated
     expect(codon.model).toBeDefined();
-    expect(codon.model.modelId).toContain("opus");
+    expect(codon.model.modelId).toBe("claude-opus-4-6");
   });
 
   test("throws on missing required fields", () => {
@@ -2924,12 +2818,17 @@ describe("loadCodonSequence", () => {
 
     writeHankConfig(configPath, invalidConfig);
 
-    expect(() => loadCodonSequence({ configPath, modelOverride: "sonnet" })).not.toThrow();
+    expect(() =>
+      loadCodonSequence({ configPath, modelOverride: "anthropic/claude-sonnet-4-6" }),
+    ).not.toThrow();
 
-    const { codons: result } = loadCodonSequence({ configPath, modelOverride: "sonnet" });
+    const { codons: result } = loadCodonSequence({
+      configPath,
+      modelOverride: "anthropic/claude-sonnet-4-6",
+    });
     expect(result).toHaveLength(1);
     const codon = result[0] as import("../../server/types/types.js").Codon;
-    expect(codon.model.modelId).toContain("sonnet");
+    expect(codon.model.modelId).toBe("claude-sonnet-4-6");
   });
 
   test("applies model override to codons inside loops", () => {
@@ -2950,14 +2849,14 @@ describe("loadCodonSequence", () => {
           {
             id: "codon-1",
             name: "Codon 1",
-            model: "opus",
+            model: "anthropic/claude-opus-4-6",
             continuationMode: "fresh",
             promptFile: promptPath,
           },
           {
             id: "codon-2",
             name: "Codon 2",
-            model: "sonnet",
+            model: "anthropic/claude-sonnet-4-6",
             continuationMode: "fresh",
             promptFile: promptPath,
           },
@@ -2967,12 +2866,15 @@ describe("loadCodonSequence", () => {
 
     writeHankConfig(configPath, loopConfig);
 
-    const { codons: result } = loadCodonSequence({ configPath, modelOverride: "haiku" });
+    const { codons: result } = loadCodonSequence({
+      configPath,
+      modelOverride: "anthropic/claude-haiku-4-5",
+    });
     expect(result).toHaveLength(1);
     const loop = result[0] as import("../../server/types/types.js").Loop;
     expect(loop.type).toBe("loop");
     for (const codon of loop.codons) {
-      expect(codon.model.modelId).toContain("haiku");
+      expect(codon.model.modelId).toBe("claude-haiku-4-5");
     }
   });
 
@@ -2981,7 +2883,7 @@ describe("loadCodonSequence", () => {
       {
         id: "test-codon",
         name: "Test Codon",
-        model: "sonnet",
+        model: "anthropic/claude-sonnet-4-6",
         continuationMode: "fresh",
         promptText: "Test prompt",
       },
@@ -2999,7 +2901,7 @@ describe("loadCodonSequence", () => {
       {
         id: "test-codon",
         name: "Test Codon",
-        model: "opus",
+        model: "anthropic/claude-opus-4-6",
       },
     ];
 
@@ -3012,7 +2914,7 @@ describe("loadCodonSequence", () => {
       {
         id: "test-codon",
         name: "Test Codon",
-        model: "opus",
+        model: "anthropic/claude-opus-4-6",
         continuationMode: "fresh",
         promptFile: "./prompt.md",
         promptText: "Test prompt",
@@ -3037,7 +2939,7 @@ describe("loadCodonSequence", () => {
       {
         id: "test-codon",
         name: "Test Codon",
-        model: "opus",
+        model: "anthropic/claude-opus-4-6",
         continuationMode: "fresh",
         promptText: "Test prompt",
         appendSystemPromptFile: "./system.md",
@@ -3055,7 +2957,7 @@ describe("loadCodonSequence", () => {
       {
         id: "test-codon",
         name: "Test Codon",
-        model: "opus",
+        model: "anthropic/claude-opus-4-6",
         continuationMode: "fresh",
         promptFile: "./prompt.md",
       },
@@ -3078,7 +2980,7 @@ describe("loadCodonSequence", () => {
       {
         id: "test-codon",
         name: "Test Codon",
-        model: "opus",
+        model: "anthropic/claude-opus-4-6",
         continuationMode: "fresh",
         promptFile: ["./prompt1.md", "./prompt2.md"],
       },
@@ -3101,7 +3003,7 @@ describe("loadCodonSequence", () => {
       {
         id: "test-codon",
         name: "Test Codon",
-        model: "opus",
+        model: "anthropic/claude-opus-4-6",
         continuationMode: "fresh",
         promptText: "Test prompt",
         rigSetup: [
@@ -3121,7 +3023,7 @@ describe("loadCodonSequence", () => {
       {
         id: "test-codon",
         name: "Test Codon",
-        model: "opus",
+        model: "anthropic/claude-opus-4-6",
         continuationMode: "fresh",
         promptText: "Test prompt",
         rigSetup: [{ type: "copy", copy: { from: ".", to: "workspace" } }],
@@ -3138,7 +3040,7 @@ describe("loadCodonSequence", () => {
       {
         id: "test-codon",
         name: "Test Codon",
-        model: "opus",
+        model: "anthropic/claude-opus-4-6",
         continuationMode: "fresh",
         promptText: "Test prompt",
         rigSetup: [{ type: "copy", copy: { from: "sub/..", to: "workspace" } }],
@@ -3154,7 +3056,7 @@ describe("loadCodonSequence", () => {
       {
         id: "test-codon",
         name: "Test Codon",
-        model: "opus",
+        model: "anthropic/claude-opus-4-6",
         continuationMode: "fresh",
         promptFile: "./non-existent.md",
       },
@@ -3194,7 +3096,7 @@ describe("loadCodonSequence", () => {
         {
           id: "test-codon",
           name: "Test Codon",
-          model: "opus",
+          model: "anthropic/claude-opus-4-6",
           continuationMode: "fresh",
           promptFile: "./unreadable.md",
         },
@@ -3246,7 +3148,7 @@ describe("loadCodonSequence", () => {
           {
             id: "loop-codon-1",
             name: "Loop Codon 1",
-            model: "sonnet",
+            model: "anthropic/claude-sonnet-4-6",
             continuationMode: "fresh",
             promptFile: "./prompt.md",
           },
@@ -3292,7 +3194,7 @@ describe("loadCodonSequence", () => {
           {
             id: "codon-1",
             name: "Codon 1",
-            model: "opus",
+            model: "anthropic/claude-opus-4-6",
             continuationMode: "fresh",
             promptText: "Do something",
           },
@@ -3320,7 +3222,7 @@ describe("loadCodonSequence", () => {
       {
         id: "regular-codon",
         name: "Regular Codon",
-        model: "sonnet",
+        model: "anthropic/claude-sonnet-4-6",
         continuationMode: "fresh",
         promptText: "Regular codon",
       },
@@ -3336,7 +3238,7 @@ describe("loadCodonSequence", () => {
           {
             id: "loop-codon",
             name: "Loop Codon",
-            model: "sonnet",
+            model: "anthropic/claude-sonnet-4-6",
             continuationMode: "fresh",
             promptFile: "./prompt.md",
           },
@@ -3345,7 +3247,7 @@ describe("loadCodonSequence", () => {
       {
         id: "another-codon",
         name: "Another Codon",
-        model: "opus",
+        model: "anthropic/claude-opus-4-6",
         continuationMode: "fresh",
         promptText: "Another codon",
       },
@@ -3377,7 +3279,7 @@ describe("loadCodonSequence", () => {
           {
             id: "nested-codon",
             name: "Nested Codon",
-            model: "sonnet",
+            model: "anthropic/claude-sonnet-4-6",
             continuationMode: "fresh",
             promptFile: "./loop-prompt.md",
             appendSystemPromptFile: "./system.md",
@@ -3415,14 +3317,14 @@ describe("loadCodonSequence", () => {
           {
             id: "write-code",
             name: "Write Code",
-            model: "sonnet",
+            model: "anthropic/claude-sonnet-4-6",
             continuationMode: "fresh",
             promptFile: "./prompt1.md",
           },
           {
             id: "write-tests",
             name: "Write Tests",
-            model: "sonnet",
+            model: "anthropic/claude-sonnet-4-6",
             continuationMode: "continue-previous",
             promptFile: "./prompt2.md",
           },
@@ -3488,7 +3390,7 @@ describe("loadCodonSequence", () => {
           {
             id: "codon-1",
             name: "Codon 1",
-            model: "sonnet",
+            model: "anthropic/claude-sonnet-4-6",
             continuationMode: "fresh",
             promptText: "Test",
           },
@@ -3514,7 +3416,7 @@ describe("loadCodonSequence", () => {
           {
             id: "codon-1",
             name: "Codon 1",
-            model: "sonnet",
+            model: "anthropic/claude-sonnet-4-6",
             continuationMode: "fresh",
             promptText: "Test",
           },
@@ -3549,7 +3451,7 @@ describe("loadCodonSequence", () => {
               {
                 id: "nested-codon",
                 name: "Nested Codon",
-                model: "sonnet",
+                model: "anthropic/claude-sonnet-4-6",
                 continuationMode: "fresh",
                 promptText: "Test",
               },
@@ -3577,7 +3479,7 @@ describe("loadCodonSequence", () => {
           {
             id: "incomplete-codon",
             name: "Incomplete Codon",
-            model: "sonnet",
+            model: "anthropic/claude-sonnet-4-6",
             continuationMode: "fresh",
             // Missing promptFile or promptText
           },
@@ -3603,7 +3505,7 @@ describe("loadCodonSequence", () => {
           {
             id: "codon-1",
             name: "Codon 1",
-            model: "sonnet",
+            model: "anthropic/claude-sonnet-4-6",
             continuationMode: "fresh",
             promptFile: "./non-existent.md", // File doesn't exist
           },
@@ -3632,7 +3534,7 @@ describe("loadCodonSequence", () => {
           {
             id: "setup-codon",
             name: "Setup Codon",
-            model: "sonnet",
+            model: "anthropic/claude-sonnet-4-6",
             continuationMode: "fresh",
             promptFile: "./prompt.md",
             rigSetup: [
@@ -3670,7 +3572,7 @@ describe("loadCodonSequence", () => {
       {
         id: "setup-codon",
         name: "Setup Codon",
-        model: "sonnet",
+        model: "anthropic/claude-sonnet-4-6",
         continuationMode: "fresh",
         promptFile: "./prompt.md",
         rigSetup: [
@@ -3792,7 +3694,7 @@ describe("validateRequiredEnv (ENG-121)", () => {
 const MINIMAL_CODON = {
   id: "test",
   name: "Test",
-  model: "sonnet",
+  model: "anthropic/claude-sonnet-4-6",
   continuationMode: "fresh" as const,
   promptText: "Test",
 };
@@ -4121,113 +4023,6 @@ describe("loop-level budget shares validation", () => {
   });
 });
 
-describe("self-test failure classification & guidance", () => {
-  function makeResult(overrides: Partial<ShimSelfTestResult>): ShimSelfTestResult {
-    return {
-      shim: { name: "pi", version: "1.0.0" },
-      agent: { name: "pi", version: "1.0.0", found: true },
-      checks: [],
-      overall: { passed: false, message: "fail" },
-      ...overrides,
-    };
-  }
-
-  test("classifies a missing agent binary as binary-missing", () => {
-    const result = makeResult({ agent: { name: "pi", version: "unknown", found: false } });
-    expect(classifyInBandSelfTest(result)).toBe("binary-missing");
-  });
-
-  test("classifies a failed api_key check as auth", () => {
-    const result = makeResult({
-      checks: [{ name: "api_key", passed: false, message: "no key" }],
-    });
-    expect(classifyInBandSelfTest(result)).toBe("auth");
-  });
-
-  test("classifies other check failures as check", () => {
-    const result = makeResult({
-      checks: [{ name: "model_registry", passed: false, message: "no models" }],
-    });
-    expect(classifyInBandSelfTest(result)).toBe("check");
-  });
-
-  test("launch guidance points at the captured output, never at API keys", () => {
-    const guidance = buildSelfTestGuidance(new Set(["launch"]));
-    expect(guidance).toContain("failed to start");
-    expect(guidance).not.toMatch(/API key/i);
-  });
-
-  test("auth guidance mentions credentials", () => {
-    const guidance = buildSelfTestGuidance(new Set(["auth"]));
-    expect(guidance).toMatch(/API keys|credentials/i);
-  });
-
-  test("binary-missing guidance defers to the per-model message, not a false PATH claim", () => {
-    const guidance = buildSelfTestGuidance(new Set(["binary-missing"]));
-    expect(guidance).toMatch(/could not be located/i);
-    expect(guidance).toMatch(/see the message above/i);
-    // Must NOT prescribe PATH — most shims don't resolve their agent from PATH.
-    expect(guidance).not.toMatch(/on your PATH/i);
-  });
-
-  test("plain check/unknown failures add no extra guidance", () => {
-    expect(buildSelfTestGuidance(new Set(["check"]))).toBe("");
-    expect(buildSelfTestGuidance(new Set(["unknown"]))).toBe("");
-  });
-});
-
-describe("formatFailedSelfTest", () => {
-  const base = {
-    modelName: "Gemini 3.5 Flash",
-    provider: "google",
-    modelId: "gemini-3.5-flash",
-  };
-
-  test("surfaces each failed check's message under the header", () => {
-    const out = formatFailedSelfTest({
-      ...base,
-      result: {
-        shim: { name: "gemini-shim", version: "1.0.0" },
-        agent: { name: "gemini", version: "unknown", found: false },
-        checks: [
-          {
-            name: "agent_found",
-            passed: false,
-            message: "Gemini CLI ('gemini') not found on PATH (searched via which)",
-          },
-          { name: "auth_configured", passed: true, message: "ok" },
-        ],
-        overall: { passed: false, message: "One or more checks failed" },
-      },
-    });
-    expect(out).toContain("Gemini 3.5 Flash (google/gemini-3.5-flash): One or more checks failed");
-    // The specific, actionable check message is surfaced...
-    expect(out).toContain(
-      "• agent_found: Gemini CLI ('gemini') not found on PATH (searched via which)",
-    );
-    // ...and passing checks are not listed.
-    expect(out).not.toContain("auth_configured");
-  });
-
-  test("launch failures (no checks) show only the header with the actionable overall message", () => {
-    const out = formatFailedSelfTest({
-      ...base,
-      provider: "pi",
-      modelId: "pi/google/gemini-3.5-flash",
-      result: {
-        shim: { name: "unknown", version: "unknown" },
-        agent: { name: "unknown", version: "unknown", found: false },
-        checks: [],
-        overall: { passed: false, message: "`pi` requires Node ≥ 22.19.0; found v20.12.2" },
-      },
-    });
-    expect(out).toBe(
-      "  - Gemini 3.5 Flash (pi/pi/google/gemini-3.5-flash): `pi` requires Node ≥ 22.19.0; found v20.12.2",
-    );
-    expect(out).not.toContain("•");
-  });
-});
-
 describe("strict hank ref schema rejections (spec 63)", () => {
   const tempDir = path.resolve("tests", "test-area", "temp-strict-refs-schema-test");
   const configPath = path.join(tempDir, "hank.json");
@@ -4243,7 +4038,7 @@ describe("strict hank ref schema rejections (spec 63)", () => {
     {
       id: "c1",
       name: "C1",
-      model: "sonnet",
+      model: "anthropic/claude-sonnet-4-6",
       continuationMode: "fresh",
       promptText: "t",
       ...extra,
@@ -4360,7 +4155,7 @@ describe("strict hank ref runtime enforcement (spec 63)", () => {
     {
       id: "c1",
       name: "C1",
-      model: "sonnet",
+      model: "anthropic/claude-sonnet-4-6",
       continuationMode: "fresh",
       promptText: "t",
       ...extra,
@@ -4553,20 +4348,17 @@ describe.skipIf(process.platform === "win32")(
     beforeEach(() => {
       cleanup(tempDir);
       fs.mkdirSync(tempDir, { recursive: true });
-      const mockLogger = new Logger("/dev/null");
-      LlmProviderRegistry.getInstance({ logger: mockLogger, performHealthCheckOnInit: false });
     });
 
     afterEach(() => {
       cleanup(tempDir);
-      LlmProviderRegistry.resetInstance();
     });
 
     const codonWith = (extra: Record<string, unknown>) => [
       {
         id: "c1",
         name: "C1",
-        model: "sonnet",
+        model: "anthropic/claude-sonnet-4-6",
         continuationMode: "fresh",
         promptText: "t",
         ...extra,

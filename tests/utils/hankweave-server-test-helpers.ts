@@ -1,3 +1,4 @@
+import { ExecutionLayout } from "../../server/execution-layout.js";
 // Collection of test helpers and utilities for launching and interacting with a Hankweave server.
 // Used for writing tests
 
@@ -321,8 +322,8 @@ export interface LaunchedServer {
    * Waits for the server process to exit WITHOUT sending it any signal, and
    * returns how it exited. Use when the process's own exit code is the value
    * under test (e.g. headless runs that must exit non-zero on failure) —
-   * `stop()`/`kill()` terminate the process themselves, so their exit codes
-   * reflect the signal, not the server's verdict.
+   * `stop()`/`kill()` initiate termination themselves, so their exit codes
+   * may reflect the shutdown request, not the server's verdict.
    * @param timeoutMs - Timeout in milliseconds (default: 120000)
    * @throws {Error} If the process is still running after the timeout
    */
@@ -388,15 +389,17 @@ export interface LaunchedServer {
    */
   disconnect: () => Promise<void>;
   /**
-   * Gracefully stops the server with SIGINT.
+   * Gracefully stops the server via its WebSocket shutdown command, reconnecting
+   * if the primary client has disconnected. Waits for process exit and cleanup.
    * @param timeoutMs - Timeout in milliseconds (default: 10000)
    * @throws {Error} If server doesn't exit within timeout
    */
   stop: (timeoutMs?: number) => Promise<void>;
   /**
    * Kills the server with the given signal (default: SIGKILL).
-   * SIGKILL terminates immediately with no cleanup; SIGTERM/SIGINT go through
-   * graceful shutdown and allow exit handlers to run.
+   * SIGKILL terminates immediately with no cleanup. SIGTERM/SIGINT allow graceful
+   * shutdown on POSIX; on Windows all three force termination without cleanup.
+   * Use stop() for portable graceful shutdown.
    * @param timeoutMs - Timeout in milliseconds (default: 5000)
    * @param signal - Signal to send (default: "SIGKILL")
    * @throws {Error} If server doesn't exit within timeout
@@ -750,6 +753,7 @@ export async function launchHankweave(options: LaunchServerOptions): Promise<Lau
     { resolve: (event: ServerEvent) => void; reject: (error: Error) => void }[]
   >();
   let connectionClosed = false;
+  let shutdownStarted = false;
 
   // Add previous events from handshake if they were requested
   if (handshakeResponse?.data?.eventHistory) {
@@ -769,6 +773,11 @@ export async function launchHankweave(options: LaunchServerOptions): Promise<Lau
       // Regular server events
       const serverEvent: ServerEvent = data;
       events.push(serverEvent);
+      // Only live events count: handshake history can include a previous
+      // runtime's shutdown when this execution has been resumed.
+      if (serverEvent.type === "info" && serverEvent.data.message.startsWith("Shutting down:")) {
+        shutdownStarted = true;
+      }
 
       // Update executionDir from server.ready event (needed for replay mode
       // where the server copies the execution dir to a temp location)
@@ -1104,15 +1113,25 @@ export async function launchHankweave(options: LaunchServerOptions): Promise<Lau
       return;
     }
 
-    const sent = child.kill("SIGINT");
-    if (!sent) {
-      await disconnect();
-      return;
-    }
-
+    let shutdownClient = client;
     try {
+      // Automatic completion closes the listener before finalization and trace
+      // upload finish. Once shutdown is announced, wait for that work instead
+      // of reconnecting to a listener that is already gone.
+      if (shutdownStarted) {
+        await waitForExit(timeoutMs);
+        return;
+      }
+      // child.kill("SIGINT") force-terminates on Windows, skipping the runtime's
+      // drain and leaving its ownership guard behind. Use the protocol on every
+      // platform so stop() consistently means graceful shutdown.
+      if (shutdownClient.readyState !== WebSocket.OPEN) {
+        shutdownClient = (await connectNewClient({ timeout: timeoutMs })).client;
+      }
+      shutdownClient.send(JSON.stringify({ id: "test-stop", type: "server.shutdown" }));
       await waitForExit(timeoutMs);
     } finally {
+      if (shutdownClient !== client) shutdownClient.close();
       await disconnect();
     }
   }
@@ -1143,7 +1162,7 @@ export async function launchHankweave(options: LaunchServerOptions): Promise<Lau
   }
 
   function hasLockFile(): boolean {
-    const lockFilePath = path.join(executionDir, ".hankweave/runtime.lock");
+    const lockFilePath = new ExecutionLayout(executionDir).runtimeLockPath;
     return fs.existsSync(lockFilePath);
   }
 

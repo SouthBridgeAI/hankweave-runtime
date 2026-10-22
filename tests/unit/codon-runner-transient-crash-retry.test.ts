@@ -95,7 +95,7 @@ describe("CodonRunner transient-crash retry", () => {
       codon: {
         id: "analyze",
         name: "Answer the next batch of queries",
-        model: "gemini-2.5-flash", // non-Anthropic -> rewritten to pi/google -> PiSdkManager
+        model: "google/gemini-2.5-flash", // non-Anthropic -> runs on Pi -> PiSdkManager
       },
     });
 

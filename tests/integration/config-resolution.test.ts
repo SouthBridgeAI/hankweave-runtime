@@ -55,7 +55,7 @@ describe("resolveSettings - Integration Tests", () => {
       runtimeConfigPath,
       JSON.stringify({
         port: 8080,
-        model: "opus",
+        model: "anthropic/claude-opus-4-6",
         autostart: false,
       }),
     );
@@ -63,7 +63,7 @@ describe("resolveSettings - Integration Tests", () => {
     const result = resolveSettings({ runtimeConfigPath });
 
     expect(result.port).toBe(8080);
-    expect(result.model).toBe("opus");
+    expect(result.model).toBe("anthropic/claude-opus-4-6");
     expect(result.autostart).toBe(false);
   });
 
@@ -73,7 +73,7 @@ describe("resolveSettings - Integration Tests", () => {
       hankPath,
       JSON.stringify({
         overrides: {
-          model: "sonnet",
+          model: "anthropic/claude-sonnet-4-6",
           dataHashTimeLimit: 15000,
           sentinel: {
             enablePersistence: false,
@@ -83,7 +83,7 @@ describe("resolveSettings - Integration Tests", () => {
           {
             id: "test-codon",
             name: "Test",
-            model: "sonnet",
+            model: "anthropic/claude-sonnet-4-6",
             continuationMode: "fresh",
             promptText: "test",
           },
@@ -93,20 +93,20 @@ describe("resolveSettings - Integration Tests", () => {
 
     const result = resolveSettings({ hankPath });
 
-    expect(result.model).toBe("sonnet");
+    expect(result.model).toBe("anthropic/claude-sonnet-4-6");
     expect(result.dataHashTimeLimit).toBe(15000);
     expect(result.sentinel?.enablePersistence).toBe(false);
   });
 
   test("merges environment variables (layer 4)", () => {
     process.env.HANKWEAVE_RUNTIME_PORT = "9000";
-    process.env.HANKWEAVE_RUNTIME_MODEL = "opus";
+    process.env.HANKWEAVE_RUNTIME_MODEL = "anthropic/claude-opus-4-6";
     process.env.HANKWEAVE_RUNTIME_WITHOUT_PROXY = "true";
 
     const result = resolveSettings();
 
     expect(result.port).toBe(9000);
-    expect(result.model).toBe("opus");
+    expect(result.model).toBe("anthropic/claude-opus-4-6");
     expect(result.withoutProxy).toBe(true);
   });
 
@@ -114,13 +114,13 @@ describe("resolveSettings - Integration Tests", () => {
     const result = resolveSettings({
       cliArgs: {
         port: 9999,
-        model: "opus",
+        model: "anthropic/claude-opus-4-6",
         anthropicBaseUrl: "https://custom.api.com",
       },
     });
 
     expect(result.port).toBe(9999);
-    expect(result.model).toBe("opus");
+    expect(result.model).toBe("anthropic/claude-opus-4-6");
     expect(result.anthropicBaseUrl).toBe("https://custom.api.com");
   });
 
@@ -136,7 +136,7 @@ describe("resolveSettings - Integration Tests", () => {
 
   test("CLI args override environment variables", () => {
     process.env.HANKWEAVE_RUNTIME_PORT = "8000";
-    process.env.HANKWEAVE_RUNTIME_MODEL = "sonnet";
+    process.env.HANKWEAVE_RUNTIME_MODEL = "anthropic/claude-sonnet-4-6";
 
     const result = resolveSettings({
       cliArgs: {
@@ -146,7 +146,7 @@ describe("resolveSettings - Integration Tests", () => {
     });
 
     expect(result.port).toBe(9999); // CLI wins
-    expect(result.model).toBe("sonnet"); // From env
+    expect(result.model).toBe("anthropic/claude-sonnet-4-6"); // From env
   });
 
   test("environment variables override hank overrides", () => {
@@ -155,14 +155,14 @@ describe("resolveSettings - Integration Tests", () => {
       hankPath,
       JSON.stringify({
         overrides: {
-          model: "sonnet",
+          model: "anthropic/claude-sonnet-4-6",
           dataHashTimeLimit: 10000,
         },
         hank: [
           {
             id: "test",
             name: "Test",
-            model: "sonnet",
+            model: "anthropic/claude-sonnet-4-6",
             continuationMode: "fresh",
             promptText: "test",
           },
@@ -170,11 +170,11 @@ describe("resolveSettings - Integration Tests", () => {
       }),
     );
 
-    process.env.HANKWEAVE_RUNTIME_MODEL = "opus";
+    process.env.HANKWEAVE_RUNTIME_MODEL = "anthropic/claude-opus-4-6";
 
     const result = resolveSettings({ hankPath });
 
-    expect(result.model).toBe("opus"); // Env wins
+    expect(result.model).toBe("anthropic/claude-opus-4-6"); // Env wins
     expect(result.dataHashTimeLimit).toBe(10000); // From hank
   });
 
@@ -184,7 +184,7 @@ describe("resolveSettings - Integration Tests", () => {
       runtimeConfigPath,
       JSON.stringify({
         port: 8080,
-        model: "sonnet",
+        model: "anthropic/claude-sonnet-4-6",
       }),
     );
 
@@ -193,13 +193,13 @@ describe("resolveSettings - Integration Tests", () => {
       hankPath,
       JSON.stringify({
         overrides: {
-          model: "opus", // Override runtime config
+          model: "anthropic/claude-opus-4-6", // Override runtime config
         },
         hank: [
           {
             id: "test",
             name: "Test",
-            model: "sonnet",
+            model: "anthropic/claude-sonnet-4-6",
             continuationMode: "fresh",
             promptText: "test",
           },
@@ -209,7 +209,7 @@ describe("resolveSettings - Integration Tests", () => {
 
     const result = resolveSettings({ runtimeConfigPath, hankPath });
 
-    expect(result.model).toBe("opus"); // Hank wins
+    expect(result.model).toBe("anthropic/claude-opus-4-6"); // Hank wins
     expect(result.port).toBe(8080); // From runtime config
   });
 
@@ -237,7 +237,7 @@ describe("resolveSettings - Integration Tests", () => {
       runtimeConfigPath,
       JSON.stringify({
         port: 8080,
-        model: "sonnet",
+        model: "anthropic/claude-sonnet-4-6",
         autostart: false,
         logParsingInterval: 2000,
       }),
@@ -249,14 +249,14 @@ describe("resolveSettings - Integration Tests", () => {
       hankPath,
       JSON.stringify({
         overrides: {
-          model: "opus", // Override runtime config
+          model: "anthropic/claude-opus-4-6", // Override runtime config
           dataHashTimeLimit: 15000,
         },
         hank: [
           {
             id: "test",
             name: "Test",
-            model: "sonnet",
+            model: "anthropic/claude-sonnet-4-6",
             continuationMode: "fresh",
             promptText: "test",
           },
@@ -280,7 +280,7 @@ describe("resolveSettings - Integration Tests", () => {
 
     // Verify precedence (CLI > Env > Hank > Runtime > Default)
     expect(result.port).toBe(9999); // CLI (layer 5) wins
-    expect(result.model).toBe("opus"); // Hank (layer 3) wins over runtime
+    expect(result.model).toBe("anthropic/claude-opus-4-6"); // Hank (layer 3) wins over runtime
     expect(result.autostart).toBe(false); // Runtime (layer 2)
     expect(result.withoutProxy).toBe(true); // Env (layer 4)
     expect(result.anthropicBaseUrl).toBe("https://custom.api.com"); // CLI (layer 5)
@@ -316,7 +316,7 @@ describe("resolveSettings - Integration Tests", () => {
           {
             id: "test",
             name: "Test",
-            model: "sonnet",
+            model: "anthropic/claude-sonnet-4-6",
             continuationMode: "fresh",
             promptText: "test",
           },
@@ -344,6 +344,17 @@ describe("resolveSettings - Integration Tests", () => {
     expect(result.port).toBe(0); // Default is dynamic port allocation;
   });
 
+  test("stops on an invalid runtime config instead of silently dropping it, budget and all", () => {
+    const runtimeConfigPath = path.join(TEST_DIR, "hankweave.json");
+    fs.writeFileSync(
+      runtimeConfigPath,
+      JSON.stringify({ model: "anthropic/claude-no-such-model-0", budget: { maxDollars: 0.01 } }),
+    );
+    expect(() => resolveSettings({ runtimeConfigPath })).toThrow(
+      "anthropic/claude-no-such-model-0",
+    );
+  });
+
   test("handles missing hank file gracefully", () => {
     const result = resolveSettings({
       hankPath: path.join(TEST_DIR, "nonexistent.json"),
@@ -363,7 +374,7 @@ describe("resolveSettings - Integration Tests", () => {
           {
             id: "test",
             name: "Test",
-            model: "sonnet",
+            model: "anthropic/claude-sonnet-4-6",
             continuationMode: "fresh",
             promptText: "test",
           },
@@ -397,7 +408,7 @@ describe("resolveSettings - Integration Tests", () => {
           {
             id: "test",
             name: "Test",
-            model: "sonnet",
+            model: "anthropic/claude-sonnet-4-6",
             continuationMode: "fresh",
             promptText: "test",
           },
@@ -423,7 +434,7 @@ describe("resolveSettings - Integration Tests", () => {
       }),
     );
 
-    process.env.HANKWEAVE_RUNTIME_MODEL = "opus";
+    process.env.HANKWEAVE_RUNTIME_MODEL = "anthropic/claude-opus-4-6";
     process.env.HANKWEAVE_RUNTIME_SENTINEL_HEALTH_CHECK_GRACE_PERIOD_MS = "5000";
 
     const result = resolveSettings({
@@ -438,7 +449,7 @@ describe("resolveSettings - Integration Tests", () => {
 
     // Should deep merge everything
     expect(result.port).toBe(8080); // Runtime
-    expect(result.model).toBe("opus"); // Env
+    expect(result.model).toBe("anthropic/claude-opus-4-6"); // Env
     expect(result.autostart).toBe(false); // CLI
     expect(result.sentinel?.enablePersistence).toBe(true); // Runtime
     expect(result.sentinel?.healthCheckGracePeriodMs).toBe(5000); // Env
@@ -457,7 +468,7 @@ describe("resolveSettings - Integration Tests", () => {
           {
             id: "test",
             name: "Test",
-            model: "sonnet",
+            model: "anthropic/claude-sonnet-4-6",
             continuationMode: "fresh",
             promptText: "test",
           },
@@ -573,7 +584,7 @@ describe("resolveSettings - Integration Tests", () => {
           {
             id: "test",
             name: "Test",
-            model: "sonnet",
+            model: "anthropic/claude-sonnet-4-6",
             continuationMode: "fresh",
             promptText: "test",
           },

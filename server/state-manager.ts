@@ -23,7 +23,6 @@ import {
   seedFromThread,
   type ThreadCodon,
 } from "./execution-thread.js";
-import { LlmProviderRegistry } from "./llm/llm-provider-registry.js";
 import {
   type RollbackCheckpointType,
   RollbackMutatedWorkspaceError,
@@ -220,10 +219,7 @@ export class StateManager extends TypedEventEmitter<StateManagerEvents> implemen
     // persisted by a pre-upgrade version with providerId google/openai/opencode
     // must be migrated to the pi passthrough or CodonRunner refuses them.
     for (const entry of parsedState.executionPlan) {
-      const normalized = normalizeLegacyProviderModelInfo(
-        entry.codon.model,
-        LlmProviderRegistry.getInstance(),
-      );
+      const normalized = normalizeLegacyProviderModelInfo(entry.codon.model);
       if (normalized !== entry.codon.model) {
         this.logger.log(
           `Migrated legacy provider model for codon ${entry.codonId}: ` +

@@ -2,57 +2,47 @@
 
 echo "🧹 Cleaning up Hankweave test environment..."
 
-# First, check if lock file exists and use the PID from it
-LOCK_FILE="tests/test-area/.hankweave/runtime.lock"
-if [ -f "$LOCK_FILE" ]; then
-    echo "Found lock file: $LOCK_FILE"
-    SERVER_PID=$(cat "$LOCK_FILE" 2>/dev/null)
+# proper-lockfile creates an in-directory lease, with no PID file to read.
+TEST_AREA="$(pwd -P)/tests/test-area"
+LOCK_DIR="${TEST_AREA}/.hankweave-runtime.lock"
 
-    if [ ! -z "$SERVER_PID" ]; then
-        echo "Lock file contains PID: $SERVER_PID"
-
-        # Verify this PID is actually our server by checking the command
-        if ps -p "$SERVER_PID" -o args= 2>/dev/null | grep -q "test-codons.config.json"; then
-            echo "✅ Found our test server process (PID: $SERVER_PID)"
-            echo "Killing process..."
-            kill -TERM "$SERVER_PID" 2>/dev/null || true
-            sleep 1
-            # Check if still running
-            if ps -p "$SERVER_PID" > /dev/null 2>&1; then
-                echo "Process still running, sending SIGKILL..."
-                kill -KILL "$SERVER_PID" 2>/dev/null || true
-            fi
-            echo "✅ Server process killed"
-        else
-            echo "⚠️  PID $SERVER_PID doesn't appear to be our test server"
-        fi
-    fi
-
-    echo "Removing lock file..."
-    rm -f "$LOCK_FILE"
-    echo "✅ Lock file removed"
-else
-    echo "✅ No lock file found"
-fi
-
-# Double-check: Look for any processes with our specific test config
-echo "Double-checking for test server processes..."
+# Find and stop test servers before removing their ownership directory.
+echo "Checking for test server processes..."
 TEST_SERVER_PIDS=$(ps aux | grep "test-codons.config.json" | grep -v grep | awk '{print $2}')
 
 if [ ! -z "$TEST_SERVER_PIDS" ]; then
-    echo "⚠️  Found additional test server processes: $TEST_SERVER_PIDS"
+    echo "⚠️  Found test server processes: $TEST_SERVER_PIDS"
     for PID in $TEST_SERVER_PIDS; do
-        # Verify it's in our test directory
-        if lsof -p "$PID" 2>/dev/null | grep -q "tests/test-area"; then
+        # Verify it belongs to this workspace's test area.
+        if lsof -p "$PID" 2>/dev/null | grep -Fq "$TEST_AREA"; then
             echo "Killing test server process $PID..."
             kill -TERM "$PID" 2>/dev/null || true
             sleep 1
             kill -KILL "$PID" 2>/dev/null || true
+            for attempt in {1..50}; do
+                if ! kill -0 "$PID" 2>/dev/null; then
+                    break
+                fi
+                sleep 0.1
+            done
+            if kill -0 "$PID" 2>/dev/null; then
+                echo "❌ Test server $PID is still running; leaving its lock and test area intact"
+                exit 1
+            fi
         fi
     done
-    echo "✅ Additional test server processes killed"
+    echo "✅ Test server processes stopped"
 else
-    echo "✅ No additional test server processes found"
+    echo "✅ No test server processes found"
+fi
+
+# A clean exit removes the lock; SIGKILL can leave an empty directory behind.
+if [ -d "$LOCK_DIR" ]; then
+    echo "Removing leftover lock directory: $LOCK_DIR"
+    rmdir "$LOCK_DIR" || exit 1
+    echo "✅ Lock directory removed"
+else
+    echo "✅ No lock directory found"
 fi
 
 # Optional: Clean test area

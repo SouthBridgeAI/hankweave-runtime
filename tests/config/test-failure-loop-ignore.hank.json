@@ -9,7 +9,7 @@
         {
           "id": "loop-codon",
           "name": "Codon That May Fail",
-          "model": "haiku",
+          "model": "anthropic/claude-haiku-4-5",
           "continuationMode": "continue-previous",
           "promptText": "Do something that might fail",
           "onFailure": "ignore"

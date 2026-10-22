@@ -8,7 +8,7 @@
  * Usage:
  *   bun tests/cross-runtime/dynamic-port.test.ts
  *   npx tsx tests/cross-runtime/dynamic-port.test.ts
- *   deno run --allow-net --allow-read --allow-env --node-modules-dir tests/cross-runtime/dynamic-port.test.ts
+ *   deno run --allow-net --allow-read --allow-env --node-modules-dir=manual tests/cross-runtime/dynamic-port.test.ts
  *
  * Known issues:
  *   The port getter in server/utils.ts only works under Bun. Node.js and

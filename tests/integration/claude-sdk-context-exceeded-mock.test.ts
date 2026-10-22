@@ -162,7 +162,7 @@ describe("claude-sdk input-overflow against a local mock provider", () => {
             id: "setup",
             name: "Setup",
             promptText: "Reply with exactly: Setup done.",
-            model: "haiku",
+            model: "anthropic/claude-haiku-4-5",
             continuationMode: "fresh",
           },
           {
@@ -175,7 +175,7 @@ describe("claude-sdk input-overflow against a local mock provider", () => {
                 id: "gen",
                 name: "Generate",
                 promptText: `${FAIL_MARKER} keep writing until the window is full.`,
-                model: "haiku",
+                model: "anthropic/claude-haiku-4-5",
                 continuationMode: "continue-previous",
               },
             ],

@@ -39,10 +39,12 @@ for (const file of testFiles) {
       cmd = `npx tsx ${filePath}`;
       break;
     case "deno":
-      // --minimum-dependency-age=0: Deno 2.9+ refuses npm packages published
-      // within the last 24h by default; our deps are pinned by the lockfile,
-      // so freshly released versions must still install.
-      cmd = `deno run -A --minimum-dependency-age=0 --node-modules-dir --sloppy-imports ${filePath}`;
+      // --node-modules-dir=manual: use the node_modules bun installed from
+      // bun.lock. The default (auto) re-resolves package.json ranges, ignoring
+      // bun.lock, and rewrites node_modules in place; release.yml's publish
+      // build then bundled those newer deps (0.13.0 shipped bedrock 3.0.141,
+      // which imports an @ai-sdk/anthropic export our ^2.0.94 range lacks).
+      cmd = `deno run -A --node-modules-dir=manual --sloppy-imports ${filePath}`;
       break;
     default:
       throw new Error(`Unknown runtime: ${runtime}`);

@@ -57,7 +57,7 @@ describe("StateManager rollback", () => {
       createTestCodon({
         id,
         name: id,
-        model: "haiku",
+        model: "anthropic/claude-haiku-4-5",
         continuationMode: "fresh",
         promptText: id,
         checkpointedFiles: ["*.txt"],

@@ -104,6 +104,7 @@ async function countDirectoryContents(
   let directories = 0;
 
   for (const entry of entries) {
+    if (entry.name === ExecutionLayout.RUNTIME_LOCK) continue;
     if (entry.isDirectory()) {
       directories++;
     } else {
@@ -136,6 +137,8 @@ export interface ExecutionSetup {
     bundleHash?: string;
     bundlePath?: string;
     hankweaveVersion: string;
+    /** Last published listening ports for --attach; cleared on orderly shutdown. */
+    runtime?: { port: number; proxyPort?: number };
     environment: {
       invocationMethod: string;
       platform: string;
@@ -146,7 +149,68 @@ export interface ExecutionSetup {
   };
 }
 
-export async function setupExecutionEnvironment(options: {
+/** Write the complete metadata atomically while holding execution ownership. */
+function writeExecutionMetadata(layout: ExecutionLayout, meta: Record<string, unknown>): void {
+  fs.mkdirSync(layout.stateDir, { recursive: true });
+  const tmp = `${layout.metaPath}.tmp-${crypto.randomUUID()}`;
+  try {
+    fs.writeFileSync(tmp, JSON.stringify(meta, null, 2), { flag: "wx" });
+    fs.renameSync(tmp, layout.metaPath);
+  } finally {
+    fs.rmSync(tmp, { force: true });
+  }
+}
+
+/** Publish or clear connection discovery without changing execution identity. */
+export function updateExecutionRuntimeMetadata(
+  executionPath: string,
+  runtime: ExecutionSetup["meta"]["runtime"],
+): void {
+  const layout = new ExecutionLayout(executionPath);
+  let meta: Record<string, unknown>;
+  try {
+    meta = JSON.parse(fs.readFileSync(layout.metaPath, "utf8"));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    if (!runtime) return;
+    // Embedded runtimes may start without the CLI's execution setup step.
+    meta = {};
+  }
+  if (typeof meta !== "object" || meta === null || Array.isArray(meta)) {
+    throw new Error(`Invalid execution metadata: ${layout.metaPath}`);
+  }
+  if (runtime) meta.runtime = runtime;
+  else {
+    if (!("runtime" in meta)) return;
+    delete meta.runtime;
+  }
+  writeExecutionMetadata(layout, meta);
+}
+
+/** Read the port the runtime published for `--attach`; explicit `port` wins. */
+export async function resolveAttachPort(options: {
+  port?: number;
+  executionPath?: string;
+}): Promise<number> {
+  if (options.port !== undefined) return options.port;
+  if (!options.executionPath) return 7777;
+  const file = new ExecutionLayout(options.executionPath).metaPath;
+  try {
+    const value = JSON.parse(await fs.promises.readFile(file, "utf8"));
+    if (
+      !Number.isInteger(value?.runtime?.port) ||
+      value.runtime.port < 1 ||
+      value.runtime.port > 65535
+    ) {
+      throw new Error("invalid port");
+    }
+    return value.runtime.port;
+  } catch {
+    throw new Error(`Could not read runtime port from ${file}. Use --port to specify it directly.`);
+  }
+}
+
+export interface ExecutionSetupOptions {
   readOnlySourceDataPath: string; // Already resolved to absolute
   executionPath?: string; // Already resolved to absolute, or undefined
   useSymlink?: boolean; // Default true, --copy flag sets to false
@@ -160,14 +224,36 @@ export async function setupExecutionEnvironment(options: {
   ignoreDataMismatch?: boolean; // Skip data hash verification on resume
   noWipe?: boolean; // Preserve existing agentRoot/ on --start-new --force
   headless?: boolean; // --headless: never prompt, fail closed like CI
-  /**
-   * Skip the dieted-journal auto-restore on resume. For flows that only
-   * DELETE the execution (--cleanup): restoring first is wasted work, and a
-   * damaged diet pair would abort setup and make the cleanup of exactly
-   * that broken execution impossible.
-   */
-  skipJournalRestore?: boolean;
-}): Promise<ExecutionSetup> {
+}
+
+export interface ExecutionPlan {
+  executionPath: string;
+  options: ExecutionSetupOptions;
+}
+
+/** Select the directory without writing it, so the command can acquire ownership first. */
+export async function planExecutionEnvironment(
+  options: ExecutionSetupOptions,
+): Promise<ExecutionPlan> {
+  if (options.executionPath) return { executionPath: options.executionPath, options };
+  if (!fs.existsSync(options.readOnlySourceDataPath)) {
+    throw new Error(`Data source not found: ${options.readOnlySourceDataPath}`);
+  }
+  const dataHash = await hashDataSource(
+    options.readOnlySourceDataPath,
+    options.dataHashTimeLimit ?? DEFAULT_CONFIG.dataHashTimeLimit,
+  );
+  if (!options.startNew) {
+    const existing = await findExecutionDirs(dataHash);
+    if (existing.length) return { executionPath: existing[0], options };
+  }
+  const name = `${Date.now()}-${crypto.randomUUID().slice(0, 8)}-${dataHash.slice(0, 6)}`;
+  return { executionPath: path.join(getManagedExecutionsRoot(), name), options };
+}
+
+/** Apply setup under the command's ownership of plan.executionPath. */
+export async function setupExecutionEnvironment(plan: ExecutionPlan): Promise<ExecutionSetup> {
+  const { options } = plan;
   const {
     readOnlySourceDataPath,
     executionPath,
@@ -242,7 +328,9 @@ export async function setupExecutionEnvironment(options: {
     if (startNew) {
       // With --start-new, implement tiered safety
       if (fs.existsSync(executionPath)) {
-        const entries = await fs.promises.readdir(executionPath);
+        const entries = (await fs.promises.readdir(executionPath)).filter(
+          (entry) => entry !== ExecutionLayout.RUNTIME_LOCK,
+        );
 
         if (entries.length > 0) {
           const hasHankweave = ExecutionLayout.hasExecutionState(entries);
@@ -449,47 +537,20 @@ export async function setupExecutionEnvironment(options: {
       finalExecutionPath = executionPath;
     }
   } else {
-    // Auto-detect or create execution directory
-    const executionRoot = getManagedExecutionsRoot();
-    await fs.promises.mkdir(executionRoot, { recursive: true });
-
-    if (startNew) {
-      // With --start-new, always create new directory
-      const timestamp = Date.now();
-      const random = Math.random().toString(36).substring(2, 6);
-      const dirName = `${timestamp}-${random}-${dataHash.substring(0, 6)}`;
-      finalExecutionPath = path.join(executionRoot, dirName);
-      await fs.promises.mkdir(finalExecutionPath, { recursive: true });
-      isNewExecution = true;
-      isResuming = false;
-      console.log(`Created new execution directory: ${finalExecutionPath}`);
-    } else {
-      // Without --start-new, use existing logic
-      const existingDirs = await findExecutionDirs(dataHash);
-
-      if (existingDirs.length > 0) {
-        // Use most recent
-        finalExecutionPath = existingDirs[0];
-        isResuming = true;
-        console.log(`Resuming execution in: ${finalExecutionPath}`);
-      } else {
-        // Create new execution directory
-        const timestamp = Date.now();
-        const random = Math.random().toString(36).substring(2, 6);
-        const dirName = `${timestamp}-${random}-${dataHash.substring(0, 6)}`;
-        finalExecutionPath = path.join(executionRoot, dirName);
-        await fs.promises.mkdir(finalExecutionPath, { recursive: true });
-        isNewExecution = true;
-        console.log(`Created execution directory: ${finalExecutionPath}`);
-      }
-    }
+    finalExecutionPath = plan.executionPath;
+    isResuming = !startNew && fs.existsSync(new ExecutionLayout(finalExecutionPath).metaPath);
+    isNewExecution = !isResuming;
+    await fs.promises.mkdir(finalExecutionPath, { recursive: true });
+    console.log(
+      `${isResuming ? "Resuming execution in" : "Created execution directory"}: ${finalExecutionPath}`,
+    );
   }
 
   // Diet P4 resume path (single choke point for every resume path —
   // explicit --execution, managed root, resume-by-dataHash): a dieted
   // journal is auto-restored in place (verified byte-identical) so resume
   // just works; only damaged diet artifacts still abort the setup.
-  if (isResuming && !options.skipJournalRestore) {
+  if (isResuming) {
     await ensureJournalRestored(finalExecutionPath, (message) => console.log(message));
   }
 
@@ -594,7 +655,8 @@ export async function setupExecutionEnvironment(options: {
     },
   };
 
-  await fs.promises.writeFile(existingMetaPath, JSON.stringify(meta, null, 2));
+  // Reconstructing metadata deliberately discards any previous runtime ports.
+  writeExecutionMetadata(layout, meta);
 
   return {
     readOnlySourceDataPath,

@@ -1,9 +1,7 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { loadCodonSequence } from "../../server/config";
-import { LlmProviderRegistry } from "../../server/llm/llm-provider-registry";
-import { Logger } from "../../server/utils";
 
 // -------------
 // Test Helpers
@@ -26,7 +24,7 @@ const writeHankConfig = (filePath: string, codons: unknown[]) => {
 const baseCodon = {
   id: "test",
   name: "Test",
-  model: "sonnet",
+  model: "anthropic/claude-sonnet-4-6",
   continuationMode: "fresh",
   promptText: "Test prompt",
 };
@@ -36,14 +34,6 @@ const baseCodon = {
 // -------------
 
 describe("onFailure configuration", () => {
-  beforeAll(() => {
-    const mockLogger = new Logger("/dev/null");
-    LlmProviderRegistry.getInstance({
-      logger: mockLogger,
-      performHealthCheckOnInit: false,
-    });
-  });
-
   beforeEach(() => {
     cleanup(tempDir);
     fs.mkdirSync(tempDir, { recursive: true });

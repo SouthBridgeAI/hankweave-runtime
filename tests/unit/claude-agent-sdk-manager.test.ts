@@ -471,3 +471,50 @@ describe("ClaudeAgentSDKManager idle timeout", () => {
     await expect((manager as any).writeSyntheticErrorResult("boom")).resolves.toBeUndefined();
   });
 });
+
+describe("ClaudeAgentSDKManager unrecognized-model signal", () => {
+  let tempDir: string;
+
+  beforeEach(async () => {
+    tempDir = path.resolve("tests", "test-area", `temp-test-sdk-stderr-${Date.now()}`);
+    await fs.promises.mkdir(tempDir, { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  test("logs Claude Code's unrecognized_model stderr tag through the custom spawner", async () => {
+    const logger = new Logger(path.join(tempDir, "test.log"));
+    const lines: string[] = [];
+    const log = logger.log.bind(logger);
+    logger.log = (message: string, level?: Parameters<Logger["log"]>[1]) => {
+      lines.push(message);
+      log(message, level);
+    };
+    const parser = new ClaudeLogParser({
+      logPath: path.join(tempDir, "mock.log"),
+      codonId: "test-codon",
+      parsingInterval: 100,
+    });
+    const manager = new ClaudeAgentSDKManager(tempDir, tempDir, logger, parser);
+    const codon = { id: "a", name: "A", model: { providerId: "anthropic", modelId: "claude-x-9" } };
+    // biome-ignore lint/suspicious/noExplicitAny: accessing private method for unit test
+    const options = (manager as any).buildSDKOptions(codon, null);
+
+    // The SDK hands our spawner the CLI command; stand in a process that
+    // prints the tag Claude Code writes for a model newer than its table.
+    const child = options.spawnClaudeCodeProcess({
+      command: process.execPath,
+      args: ["-e", "console.error('[claude-code:unrecognized_model] claude-x-9')"],
+      cwd: tempDir,
+      env: process.env,
+      signal: new AbortController().signal,
+    });
+    await new Promise<void>((resolve) => child.once("close", () => resolve()));
+
+    expect(lines.some((l) => l.includes("Claude Code does not recognize model 'claude-x-9'"))).toBe(
+      true,
+    );
+  });
+});

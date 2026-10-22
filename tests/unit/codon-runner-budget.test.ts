@@ -30,15 +30,14 @@ describe("CodonRunner budget integration", () => {
     const h = await suite.makeRunner({
       codon: { budget: { maxDollars: 1.0 } },
       budget: { plan: "self" },
-      // Mock that returns a real cost so CostTracker emits non-zero costDelta
-      llmRegistry: { calculateCost: () => 2.0 },
     });
 
     // Simulate cost via the runner's internal CostTracker by feeding raw usage
-    // CostTracker.handleAssistantUsage emits costIncremented → Budget picks it up
+    // priced from the codon's catalog record (a million output tokens exceeds
+    // $1 on any priced sonnet); costIncremented → Budget picks it up.
     h.internals.costTracker.handleAssistantUsage({
       input_tokens: 1000,
-      output_tokens: 1000,
+      output_tokens: 1_000_000,
     });
 
     expect(h.budget.isExceeded(h.codonId)).toBe(true);

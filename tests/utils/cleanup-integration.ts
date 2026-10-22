@@ -7,7 +7,7 @@ import { CleanupCommand } from "../../server/cleanup-command.js";
 export interface CleanupIntegrationOptions {
   /** Path to the execution directory to clean up */
   executionPath?: string;
-  /** Path to the data source directory (to find executions by hash) */
+  /** Path to the data source directory (to list other executions by hash) */
   dataSourcePath?: string;
   /** Path to any temporary test directory to remove */
   testDir?: string;
@@ -65,55 +65,22 @@ export interface CleanupIntegrationResult {
 export async function executeTestCleanup(
   options: CleanupIntegrationOptions,
 ): Promise<CleanupIntegrationResult> {
-  const {
-    executionPath,
-    dataSourcePath,
-    testDir,
-    skipConfirmation = true,
-    force = false,
-  } = options;
-
+  const { executionPath, dataSourcePath, testDir, force = false } = options;
   const directoriesRemoved: string[] = [];
   const errors: string[] = [];
   const warnings: string[] = [];
 
-  // Run cleanup command if we have execution or data source path
   if (executionPath || dataSourcePath) {
-    try {
-      // Create cleanup command
-      const cleanup = new CleanupCommand({
-        executionPath,
-        dataSourcePath,
-        skipConfirmation,
-      });
+    const result = await cleanupTestExecution(options);
+    directoriesRemoved.push(...result.directoriesRemoved);
+    errors.push(...result.errors);
+    warnings.push(...result.warnings);
 
-      // Execute cleanup
-      const result = await cleanup.execute();
-
-      // Add results
-      directoriesRemoved.push(...result.directoriesRemoved);
-      errors.push(...result.errors);
-      warnings.push(...result.warnings);
-
-      // Check if cleanup failed and force mode is enabled
-      if (!result.success && force) {
-        // Try manual cleanup as fallback
-        const manualResult = await forceManualCleanup(executionPath, dataSourcePath);
-        directoriesRemoved.push(...manualResult.directoriesRemoved);
-        errors.push(...manualResult.errors);
-        warnings.push(...manualResult.warnings);
-      }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      errors.push(`Cleanup command failed: ${errorMessage}`);
-
-      if (force) {
-        // If force is true, we'll try manual cleanup
-        const manualResult = await forceManualCleanup(executionPath, dataSourcePath);
-        directoriesRemoved.push(...manualResult.directoriesRemoved);
-        errors.push(...manualResult.errors);
-        warnings.push(...manualResult.warnings);
-      }
+    if (!result.success && force) {
+      const manualResult = await forceManualCleanup(executionPath);
+      directoriesRemoved.push(...manualResult.directoriesRemoved);
+      errors.push(...manualResult.errors);
+      warnings.push(...manualResult.warnings);
     }
   }
 
@@ -140,6 +107,27 @@ export async function executeTestCleanup(
   };
 }
 
+/** Convert command failures into results so force mode can use one fallback path. */
+async function cleanupTestExecution({
+  executionPath,
+  dataSourcePath,
+  skipConfirmation = true,
+}: CleanupIntegrationOptions): Promise<CleanupIntegrationResult> {
+  try {
+    if (!executionPath) throw new Error("executionPath must be provided");
+    const cleanup = new CleanupCommand({ executionPath, dataSourcePath, skipConfirmation });
+    return await cleanup.execute();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      success: false,
+      directoriesRemoved: [],
+      errors: [`Cleanup command failed: ${message}`],
+      warnings: [],
+    };
+  }
+}
+
 /**
  * Performs manual cleanup when the cleanup command fails.
  *
@@ -150,13 +138,9 @@ export async function executeTestCleanup(
  * - Test isolation is more important than perfect cleanup
  *
  * @param executionPath The execution directory to clean
- * @param dataSourcePath The data source path (for finding executions)
  * @returns Cleanup result
  */
-async function forceManualCleanup(
-  executionPath?: string,
-  dataSourcePath?: string,
-): Promise<CleanupIntegrationResult> {
+async function forceManualCleanup(executionPath?: string): Promise<CleanupIntegrationResult> {
   const warnings: string[] = ["Performing manual cleanup due to CleanupCommand failure"];
   const directoriesRemoved: string[] = [];
   const errors: string[] = [];
@@ -168,31 +152,6 @@ async function forceManualCleanup(
       directoriesRemoved.push(executionPath);
     } catch (error) {
       errors.push(`Failed to manually remove execution directory: ${error}`);
-    }
-  }
-
-  // If we have a data source path, try to find and remove execution directories
-  if (dataSourcePath && !executionPath) {
-    try {
-      // Import data hasher functions
-      const { hashDataDirectory, findExecutionDirs } = await import("../../server/data-hasher.js");
-
-      // Calculate hash and find directories
-      const dataHash = await hashDataDirectory(dataSourcePath);
-      const execDirs = await findExecutionDirs(dataHash);
-
-      // Remove latest execution directory
-      if (execDirs.length > 0) {
-        const latestDir = execDirs[0];
-        try {
-          await fs.promises.rm(latestDir, { recursive: true, force: true });
-          directoriesRemoved.push(latestDir);
-        } catch (error) {
-          errors.push(`Failed to remove execution directory ${latestDir}: ${error}`);
-        }
-      }
-    } catch (error) {
-      errors.push(`Failed to find execution directories: ${error}`);
     }
   }
 

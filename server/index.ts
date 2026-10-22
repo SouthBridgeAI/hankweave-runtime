@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -8,16 +9,30 @@ import { ClaudeAgentSDKManager } from "./claude-agent-sdk-manager.js";
 import { CleanupCommand } from "./cleanup-command.js";
 import { HELP_TEXT, parseCliArgs, showDeprecationWarnings } from "./cli-parser.js";
 import { ensureSchemaUrl, resolveSettings, validateHank } from "./config.js";
+import { findExecutionDirs, hashDataSource } from "./data-hasher.js";
+import { registerReplayCleanup } from "./execution-cleanup.js";
 import { ExecutionLayout } from "./execution-layout.js";
-import type { ExecutionSetup } from "./execution-setup.js";
-import { setupExecutionEnvironment } from "./execution-setup.js";
-import { assertGitAvailable } from "./git-support.js";
+import type { ExecutionPlan, ExecutionSetup } from "./execution-setup.js";
+import {
+  planExecutionEnvironment,
+  resolveAttachPort,
+  setupExecutionEnvironment,
+} from "./execution-setup.js";
+import { assertGitAvailable, GitMissingError } from "./git-support.js";
 import { HANKWEAVE_ENV_UNSET, hankweaveEnvEntries } from "./hankweave-env.js";
-import { HankweaveRuntime } from "./hankweave-runtime.js";
+import {
+  HankweaveRuntime,
+  RuntimeLock,
+  RuntimeLockHeldError,
+  type RuntimeShutdownResult,
+} from "./hankweave-runtime.js";
+import { modelHarnesses, readModelConfigs } from "./harnesses.js";
 import { initProject } from "./init-command.js";
 import { maintainJournal } from "./journal-command.js";
-import { LlmProviderRegistry } from "./llm/llm-provider-registry.js";
+import { Models } from "./llm/index.js";
 import { runPackCommand } from "./pack/pack-command.js";
+import { applyEnvOverlay, buildEnvOverlay } from "./pi-sdk-manager.js";
+import { LOCK_TAKEOVER_WAIT_MS } from "./runtime-lock.js";
 import { resolveStartupSource, type StartupSource, StartupSourceError } from "./startup-source.js";
 import {
   getOrCreateClientId,
@@ -98,6 +113,7 @@ type CliArgs = ReturnType<typeof parseCliArgs>;
 type ResolvedConfig = ReturnType<typeof resolveSettings>;
 type ValidationResult = Awaited<ReturnType<typeof validateHank>>;
 type RuntimeStartup = {
+  lock: RuntimeLock;
   cliArgs: CliArgs;
   source: StartupSource;
   resolvedConfig: ResolvedConfig;
@@ -173,35 +189,8 @@ async function runInitCli(): Promise<never> {
   }
 }
 
-async function readAttachPort(executionPath: string): Promise<number> {
-  // Try to read port from lock file
-  const lockPath = new ExecutionLayout(executionPath).lockPath;
-  try {
-    const lockContent = await fs.promises.readFile(lockPath, "utf-8");
-    const lockData = JSON.parse(lockContent);
-    // NOTE: Use !== undefined for port (port 0 is valid but falsy)
-    const port = lockData.port !== undefined ? lockData.port : 7777;
-    console.log(`> Read port ${port} from lock file: ${lockPath}`);
-    return port;
-  } catch {
-    console.error(`Error: Could not read lock file: ${lockPath}`);
-    console.error("   Use --port to specify the server port directly.");
-    process.exit(1);
-  }
-}
-
 async function attachToServer(cliArgs: CliArgs): Promise<void> {
-  let port: number;
-
-  if (cliArgs.port !== undefined) {
-    // Explicit --port takes precedence
-    port = cliArgs.port;
-  } else if (cliArgs.executionPath) {
-    port = await readAttachPort(cliArgs.executionPath);
-  } else {
-    // Default to standard port
-    port = 7777;
-  }
+  const port = await resolveAttachPort(cliArgs);
 
   console.log(`🔌 Attaching to server on port ${port}...`);
   new BasicTUI({ port });
@@ -282,26 +271,38 @@ async function handleEarlyCommands(cliArgs: CliArgs): Promise<boolean> {
   return false;
 }
 
+/**
+ * An error's stack frames without the "Name: message" header the stack
+ * starts with: the message is already printed above it, and a multi-line
+ * message (a hank validation report) would otherwise appear twice.
+ */
+function stackFrames(error: Error): string {
+  const stack = error.stack ?? "";
+  const firstFrame = stack.search(/^\s+at /m);
+  return firstFrame === -1 ? "" : stack.slice(firstFrame);
+}
+
 function reportSdkFailure(error: unknown): never {
   console.error(`\nError: ${(error as Error).message}\n`);
-  if (error instanceof Error && error.stack) {
-    console.error(`Stack: ${error.stack}`);
+  if (error instanceof Error && stackFrames(error)) {
+    console.error(`Stack: ${stackFrames(error)}`);
   }
   process.exit(1);
 }
 
-async function ensureClaudeSdk(cliArgs: CliArgs) {
-  let claudeSdkInfo: { version: string; cached: boolean } | null = null;
-  if (!cliArgs.cleanup && !cliArgs.validate) {
-    try {
-      const sdkResult = await ClaudeAgentSDKManager.ensureSdkAvailable();
-      claudeSdkInfo = { version: sdkResult.version, cached: sdkResult.cached };
-    } catch (error) {
-      reportSdkFailure(error);
-    }
-  }
+/** Cleanup and validation run no codon; replay runs no harness: none needs a Claude executable. */
+function needsClaudeSdk(cliArgs: CliArgs): boolean {
+  return !cliArgs.cleanup && !cliArgs.validate && !cliArgs.replayDir;
+}
 
-  return claudeSdkInfo;
+async function ensureClaudeSdk(cliArgs: CliArgs) {
+  if (!needsClaudeSdk(cliArgs)) return null;
+  try {
+    const sdkResult = await ClaudeAgentSDKManager.ensureSdkAvailable();
+    return { version: sdkResult.version, cached: sdkResult.cached };
+  } catch (error) {
+    reportSdkFailure(error);
+  }
 }
 
 function printValidationError(error: unknown): void {
@@ -363,36 +364,6 @@ async function runValidationCli(
   }
 }
 
-function copyReplayExecution(replayDir: string): string {
-  const replaySourceDir = path.resolve(replayDir);
-  const tempExecDir = path.join(
-    os.tmpdir(),
-    `hankweave-replay-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-  );
-  try {
-    fs.cpSync(replaySourceDir, tempExecDir, { recursive: true });
-  } catch (error) {
-    console.error(
-      `Failed to copy replay directory "${replaySourceDir}": ${(error as Error).message}`,
-    );
-    process.exit(1);
-  }
-  // Remove copied runtime lock so a live source run doesn't block replay startup
-  const copiedLock = new ExecutionLayout(tempExecDir).lockPath;
-  if (fs.existsSync(copiedLock)) {
-    fs.unlinkSync(copiedLock);
-  }
-  process.on("exit", () => {
-    try {
-      fs.rmSync(tempExecDir, { recursive: true, force: true });
-    } catch {
-      // Best-effort cleanup
-    }
-  });
-  console.log(`[REPLAY] Copied execution dir to ${tempExecDir}`);
-  return tempExecDir;
-}
-
 function prepareReplayExecution(
   replayDir: string | undefined,
   executionPath: string | undefined,
@@ -404,9 +375,10 @@ function prepareReplayExecution(
     process.exit(1);
   }
 
-  // When --replay is used, copy the replay dir to a temp location
-  // so the original execution directory is preserved as a read-only artifact.
-  if (replayDir) return copyReplayExecution(replayDir);
+  // Choose an isolated replay destination; copy only after the command acquires it.
+  if (replayDir) {
+    return path.join(os.tmpdir(), `hankweave-replay-${randomUUID()}`);
+  }
 
   return executionPath;
 }
@@ -421,12 +393,7 @@ async function prepareHankForExecution(
     console.log(`+ Added $schema to ${path.basename(absoluteConfigPath)} for editor support`);
   }
   // Checkpointing requires git before execution setup touches the directory.
-  try {
-    assertGitAvailable("hankweave run");
-  } catch (error) {
-    console.error(`Error: ${(error as Error).message}`);
-    process.exit(1);
-  }
+  assertGitAvailable("hankweave run");
 }
 
 function executionOptions(
@@ -450,7 +417,6 @@ function executionOptions(
     noWipe: Boolean(cliArgs.noWipe),
     // --headless runs unattended: never prompt, fail closed like CI
     headless: Boolean(cliArgs.headless),
-    skipJournalRestore: Boolean(cliArgs.cleanup),
   };
 }
 
@@ -458,27 +424,9 @@ async function prepareExecution(
   cliArgs: CliArgs,
   source: StartupSource,
   resolvedConfig: ResolvedConfig,
-): Promise<ExecutionSetup> {
-  const { configPath: absoluteConfigPath } = source.hank;
+): Promise<ExecutionPlan> {
   const executionPath = prepareReplayExecution(resolvedConfig.replayDir, cliArgs.executionPath);
-  if (!cliArgs.cleanup)
-    await prepareHankForExecution(absoluteConfigPath, {
-      skipSchemaRewrite: source.hank.skipSchemaRewrite,
-    });
-
-  // Set up execution environment
-  let executionSetup: ExecutionSetup;
-  try {
-    executionSetup = await setupExecutionEnvironment(
-      executionOptions(cliArgs, source, resolvedConfig, executionPath),
-    );
-  } catch (error) {
-    console.error("[ERROR] Execution setup failed!");
-    console.error(`Error: Execution setup failed: ${(error as Error).message}`);
-    process.exit(1);
-  }
-
-  return executionSetup;
+  return planExecutionEnvironment(executionOptions(cliArgs, source, resolvedConfig, executionPath));
 }
 
 function displayExecutionStartup(
@@ -506,12 +454,28 @@ function displayExecutionStartup(
   });
 }
 
-async function runCleanupCli(cliArgs: CliArgs, executionSetup: ExecutionSetup): Promise<never> {
+/** Cleanup only selects existing executions; runtime planning may invent a new path. */
+async function resolveCleanupTarget(
+  cliArgs: CliArgs,
+  source: StartupSource,
+): Promise<string | undefined> {
+  if (cliArgs.executionPath) return path.resolve(cliArgs.executionPath);
+  const dirs = await findExecutionDirs(await hashDataSource(source.dataPath));
+  return dirs[0];
+}
+
+async function runCleanupCli(cliArgs: CliArgs, source: StartupSource): Promise<never> {
   try {
+    const executionPath = await resolveCleanupTarget(cliArgs, source);
+    if (!executionPath) {
+      console.log("No execution directories found for this data source.");
+      await sendCliTelemetry("cli_cleanup", { success: true });
+      process.exit(0);
+    }
     const cleanup = new CleanupCommand({
-      dataSourcePath: executionSetup.readOnlySourceDataPath,
-      executionPath: executionSetup.executionPath,
-      skipConfirmation: cliArgs.skipConfirmation || false,
+      dataSourcePath: source.dataPath,
+      executionPath,
+      skipConfirmation: Boolean(cliArgs.skipConfirmation),
     });
 
     const result = await cleanup.execute();
@@ -606,6 +570,12 @@ function displayValidatedHank(
 
   console.log(structure);
   console.log("");
+
+  const modelTable = Models.current().report();
+  if (modelTable.length > 0) {
+    console.log(modelTable.join("\n"));
+    console.log("");
+  }
 
   displayHankBudget(validationResult, resolvedConfig, terminalWidth);
   displayConfigurationWarnings(warnings);
@@ -733,9 +703,10 @@ async function initializeRunTelemetry(context: RuntimeStartup, validationResult:
 async function launchRuntime(
   serverConfig: ReturnType<typeof createServerConfig>,
   telemetryCollector: TelemetryCollector,
-): Promise<void> {
+  lock: RuntimeLock,
+): Promise<RuntimeShutdownResult> {
   const headlessMode = serverConfig.headless;
-  const server = new HankweaveRuntime(serverConfig);
+  const server = new HankweaveRuntime(serverConfig, lock);
 
   // Wire telemetry into the runtime
   server.setTelemetryCollector(telemetryCollector);
@@ -761,11 +732,13 @@ async function launchRuntime(
     }, 100);
     console.log("> Running in TUI mode (use --headless to disable)");
   }
+  return server.waitForShutdown();
 }
 
 function printStartupErrorDetails(error: Error): void {
-  if (error.stack) {
-    console.error(`Stack trace:\n${error.stack}`);
+  const frames = stackFrames(error);
+  if (frames) {
+    console.error(`Stack trace:\n${frames}`);
   }
   if ("cause" in error && error.cause) {
     console.error(`Cause: ${error.cause}`);
@@ -788,15 +761,7 @@ async function captureStartupFailure(error: unknown): Promise<void> {
   }
 }
 
-async function reportStartupFailure(error: unknown): Promise<never> {
-  console.error("[ERROR] Server startup failed!");
-  console.error(`Error message: ${error instanceof Error ? error.message : String(error)}`);
-  if (error instanceof Error) printStartupErrorDetails(error);
-  await captureStartupFailure(error);
-  process.exit(1);
-}
-
-async function startRuntime(context: RuntimeStartup): Promise<void> {
+async function startRuntime(context: RuntimeStartup): Promise<RuntimeShutdownResult> {
   const { source, resolvedConfig, executionSetup } = context;
   const { configPath: absoluteConfigPath } = source.hank;
   // Load and validate configuration
@@ -808,15 +773,8 @@ async function startRuntime(context: RuntimeStartup): Promise<void> {
     console.log(`> Using global model override: ${resolvedConfig.model} (applies to all codons)`);
   }
 
-  stripUnsetEnvironment();
-
-  // Initialize LLM Provider Registry singleton before ANY config parsing/validation
-  // This must happen before validateHank() since Zod transforms use it for model validation
   const serverLogger = new Logger(path.join(executionSetup.executionPath, "model-validation.log"));
-  LlmProviderRegistry.getInstance({
-    logger: serverLogger,
-    performHealthCheckOnInit: false,
-  });
+  Models.current().attachLogger(serverLogger);
 
   try {
     // Normal server mode - validate config
@@ -827,15 +785,18 @@ async function startRuntime(context: RuntimeStartup): Promise<void> {
       modelOverride: resolvedConfig.model, // Use resolved model from all config layers
       // Replay never contacts a provider — don't require harness credentials.
       skipSelfTests: !!resolvedConfig.replayDir,
+      budgetPolicy: resolvedConfig.budget,
     });
 
     displayValidatedHank(validationResult, absoluteConfigPath, resolvedConfig);
     const serverConfig = createServerConfig(context, validationResult);
     warnOutputConflicts(serverConfig);
     const telemetryCollector = await initializeRunTelemetry(context, validationResult);
-    await launchRuntime(serverConfig, telemetryCollector);
+    return await launchRuntime(serverConfig, telemetryCollector, context.lock);
   } catch (error) {
-    await reportStartupFailure(error);
+    // The CLI boundary prints once, after main's finally blocks release ownership.
+    await captureStartupFailure(error);
+    throw error;
   }
 }
 
@@ -855,24 +816,110 @@ async function resolveSource(cliArgs: CliArgs, originalCwd: string): Promise<Sta
   }
 }
 
+async function acquireRuntimeLock(executionPath: string): Promise<RuntimeLock> {
+  try {
+    return await RuntimeLock.acquire(executionPath);
+  } catch (error) {
+    if (!(error instanceof RuntimeLockHeldError)) throw error;
+    console.error(
+      `Execution ${error.executionPath} is locked; waiting up to ~${LOCK_TAKEOVER_WAIT_MS / 1000} seconds for release or recovery. Ctrl+C to cancel.`,
+    );
+    return RuntimeLock.acquire(executionPath, { waitForStale: true });
+  }
+}
+
+/**
+ * Check every model before any config parsing (spec 72): the harness that
+ * would run it confirms it first, then the catalog prices it. Settings
+ * resolution and hank validation read the results. Replay and cleanup only
+ * parse the hank — no credentials, no network: replay must see the catalog
+ * the recorded run saw, and cleanup never runs a model.
+ */
+async function loadModels(cliArgs: CliArgs, source: StartupSource): Promise<void> {
+  const parseOnly = !!cliArgs.replayDir || !!cliArgs.cleanup;
+  const models = await Models.load({
+    raw: readModelConfigs(source.hank.configPath),
+    cliModel: cliArgs.model,
+    harnesses: modelHarnesses(),
+    env: applyEnvOverlay(process.env, buildEnvOverlay()),
+    network: !parseOnly,
+    prerequisites: !parseOnly,
+    background: !cliArgs.validate && !parseOnly,
+  });
+  for (const problem of models.problems()) console.log(`! ${problem}`);
+}
+
 async function main() {
   if (dispatchPackCommand(process.argv.slice(2))) return;
   const cliArgs = parseArguments();
   if (await handleEarlyCommands(cliArgs)) return;
+  // A run applies HANKWEAVE_*=unset before anything reads provider
+  // credentials from process.env. The first such reader is not the model
+  // pre-pass but bundle resolution: verifying an extraction walks the
+  // closure, which parses the hank's models (parse mode, no credentials).
+  // --validate and --cleanup exit before a run starts and keep the
+  // environment as it is.
+  if (!cliArgs.validate && !cliArgs.cleanup) stripUnsetEnvironment();
 
   const claudeSdkInfo = await ensureClaudeSdk(cliArgs);
   const originalCwd = process.cwd();
   const source = await resolveSource(cliArgs, originalCwd);
+  await loadModels(cliArgs, source);
   // Resolve all five config layers before validation or execution setup.
   const resolvedConfig = resolveSettings({ cliArgs, hankPath: source.hank.configPath });
   if (cliArgs.validate) await runValidationCli(cliArgs, source, resolvedConfig);
 
-  const executionSetup = await prepareExecution(cliArgs, source, resolvedConfig);
-  displayExecutionStartup(executionSetup, claudeSdkInfo);
-  process.chdir(executionSetup.executionPath);
-  if (cliArgs.cleanup) await runCleanupCli(cliArgs, executionSetup);
+  if (cliArgs.cleanup) await runCleanupCli(cliArgs, source);
+  const plan = await prepareExecution(cliArgs, source, resolvedConfig);
 
-  await startRuntime({ cliArgs, source, resolvedConfig, executionSetup, originalCwd });
+  // The runtime is what supervisors relaunch after a crash, often within seconds,
+  // while the killed predecessor's heartbeat is still fresh. Wait for that lease
+  // to expire rather than failing the relaunch (see AcquireOptions.waitForStale).
+  const lock = await acquireRuntimeLock(plan.executionPath);
+  let result: RuntimeShutdownResult | undefined;
+  let cleanupReplay: (() => Promise<void>) | undefined;
+  try {
+    try {
+      if (resolvedConfig.replayDir) {
+        cleanupReplay = registerReplayCleanup(plan.executionPath, lock);
+        await fs.promises.cp(path.resolve(resolvedConfig.replayDir), plan.executionPath, {
+          recursive: true,
+          // The destination already holds its own lease. Never merge the
+          // source's lock into it or copy locks from nested executions.
+          filter: (source) => path.basename(source) !== ExecutionLayout.RUNTIME_LOCK,
+        });
+        console.log(`[REPLAY] Copied execution dir to ${plan.executionPath}`);
+      }
+      await prepareHankForExecution(source.hank.configPath, {
+        skipSchemaRewrite: source.hank.skipSchemaRewrite,
+      });
+      const executionSetup = await setupExecutionEnvironment(plan);
+      displayExecutionStartup(executionSetup, claudeSdkInfo);
+      process.chdir(executionSetup.executionPath);
+      result = await startRuntime({
+        lock,
+        cliArgs,
+        source,
+        resolvedConfig,
+        executionSetup,
+        originalCwd,
+      });
+    } finally {
+      try {
+        // Windows keeps the process cwd open. Leave the execution tree before
+        // deleting a replay or releasing it to a successor that may remove it.
+        process.chdir(os.tmpdir());
+        await cleanupReplay?.();
+      } finally {
+        await lock.release();
+      }
+    }
+    // All remaining work uses the independent snapshot, never the execution directory.
+    await result.trace?.upload();
+  } finally {
+    await result?.trace?.dispose();
+  }
+  process.exit(result.exitCode);
 }
 
 // Global unhandled error capture for telemetry.
@@ -912,8 +959,12 @@ if (import.meta.main) {
     await main();
   } catch (error) {
     console.error(`Error: ${error instanceof Error ? error.message : String(error)}`);
-    if (error instanceof Error && error.stack) {
-      console.error(`Stack:\n${error.stack}`);
+    if (
+      error instanceof Error &&
+      !(error instanceof RuntimeLockHeldError) &&
+      !(error instanceof GitMissingError)
+    ) {
+      printStartupErrorDetails(error);
     }
     process.exit(1);
   }

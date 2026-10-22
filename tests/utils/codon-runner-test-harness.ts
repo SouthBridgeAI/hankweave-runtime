@@ -24,7 +24,7 @@ import type {
 import { CodonRunner } from "../../server/codon-runner.js";
 import { ExecutionLayout } from "../../server/execution-layout.js";
 import type { ExecutionCodonEntry } from "../../server/execution-planner.js";
-import type { LlmProviderRegistry } from "../../server/llm/llm-provider-registry.js";
+import { Models } from "../../server/llm/index.js";
 import type { StateManager } from "../../server/state-manager.js";
 import type { CodonId, RunId, SessionId } from "../../server/types/branded-types.js";
 import type { FailureReason } from "../../server/types/types.js";
@@ -188,8 +188,6 @@ export interface MakeRunnerOptions {
     shimIdleTimeout?: number;
     anthropicBaseUrl?: string;
   };
-  /** Override the mock LLM registry (e.g. a non-null calculateCost). */
-  llmRegistry?: { calculateCost: () => number | null };
   /** Budget construction inputs. plan "self" means [{ codon, codonId }]. */
   budget?: { config?: BudgetConfig; plan?: ExecutionCodonEntry[] | "self" };
   stateManager?: StateManager;
@@ -226,8 +224,6 @@ export interface CodonRunnerSuite {
   readonly tempDir: string;
   makeRunner(options?: MakeRunnerOptions): Promise<CodonRunnerHandle>;
 }
-
-const defaultLlmRegistry = { calculateCost: () => null };
 
 const defaultStateManager = {
   transition: () => {},
@@ -287,7 +283,7 @@ export function useCodonRunnerSuite(prefix: string): CodonRunnerSuite {
       id: "test-codon",
       name: "Test Codon",
       promptText: "Test prompt",
-      model: "sonnet",
+      model: "anthropic/claude-sonnet-4-5",
       continuationMode: "fresh",
       ...options.codon,
     });
@@ -308,7 +304,8 @@ export function useCodonRunnerSuite(prefix: string): CodonRunnerSuite {
       agentRootPath: tempDir,
       files: workspace.files,
       logger: new Logger(path.join(tempDir, `runner-${logFileCounter}.log`)),
-      llmRegistry: (options.llmRegistry ?? defaultLlmRegistry) as unknown as LlmProviderRegistry,
+      // The bundled catalog (test preload): codons price as in production.
+      models: Models.current(),
       runId: mockRunId,
       stateManager: options.stateManager ?? defaultStateManager,
       budget,

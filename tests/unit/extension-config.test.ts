@@ -56,7 +56,7 @@ describe("Extension Configuration", () => {
         {
           id: "extend-codon",
           name: "Extending Codon",
-          model: "haiku",
+          model: "anthropic/claude-haiku-4-5",
           continuationMode: "fresh" as const,
           promptFile,
           exhaustWithPrompt: "Please continue",
@@ -75,7 +75,7 @@ describe("Extension Configuration", () => {
         {
           id: "extend-codon",
           name: "Extending Codon",
-          model: "haiku",
+          model: "anthropic/claude-haiku-4-5",
           continuationMode: "fresh" as const,
           promptFile,
           exhaustWithPrompt: "Please continue",
@@ -94,7 +94,7 @@ describe("Extension Configuration", () => {
         {
           id: "extend-codon",
           name: "Extending Codon",
-          model: "haiku",
+          model: "anthropic/claude-haiku-4-5",
           continuationMode: "fresh" as const,
           promptFile,
           exhaustWithPrompt: "Please continue",
@@ -112,7 +112,7 @@ describe("Extension Configuration", () => {
         {
           id: "extend-codon",
           name: "Extending Codon",
-          model: "haiku",
+          model: "anthropic/claude-haiku-4-5",
           continuationMode: "fresh" as const,
           promptFile,
           exhaustWithPrompt: "Please continue",
@@ -130,7 +130,7 @@ describe("Extension Configuration", () => {
         {
           id: "extend-codon",
           name: "Extending Codon",
-          model: "haiku",
+          model: "anthropic/claude-haiku-4-5",
           continuationMode: "fresh" as const,
           promptFile,
           exhaustWithPrompt: "Please continue",
@@ -150,7 +150,7 @@ describe("Extension Configuration", () => {
         {
           id: "extend-codon",
           name: "Extending Codon",
-          model: "haiku",
+          model: "anthropic/claude-haiku-4-5",
           continuationMode: "fresh" as const,
           promptFile,
           exhaustWithPrompt: "Please continue",
@@ -158,7 +158,7 @@ describe("Extension Configuration", () => {
         {
           id: "next-codon",
           name: "Next Codon",
-          model: "haiku",
+          model: "anthropic/claude-haiku-4-5",
           continuationMode: "continue-previous" as const, // Invalid after exhaustWithPrompt
           promptFile,
         },
@@ -182,7 +182,7 @@ describe("Extension Configuration", () => {
         {
           id: "extend-codon",
           name: "Extending Codon",
-          model: "haiku",
+          model: "anthropic/claude-haiku-4-5",
           continuationMode: "fresh" as const,
           promptFile,
           exhaustWithPrompt: "Please continue",
@@ -190,7 +190,7 @@ describe("Extension Configuration", () => {
         {
           id: "next-codon",
           name: "Next Codon",
-          model: "haiku",
+          model: "anthropic/claude-haiku-4-5",
           continuationMode: "fresh" as const, // Valid
           promptFile,
         },
@@ -219,7 +219,7 @@ describe("Extension Configuration", () => {
             {
               id: "extend-codon",
               name: "Extending Codon",
-              model: "haiku",
+              model: "anthropic/claude-haiku-4-5",
               continuationMode: "fresh" as const,
               promptFile,
               exhaustWithPrompt: "Please continue",
@@ -249,7 +249,7 @@ describe("Extension Configuration", () => {
               {
                 id: "extend-codon",
                 name: "Extending Codon",
-                model: "haiku",
+                model: "anthropic/claude-haiku-4-5",
                 continuationMode: "fresh" as const,
                 promptFile,
                 exhaustWithPrompt: "Please continue",
@@ -259,7 +259,7 @@ describe("Extension Configuration", () => {
           {
             id: "next-codon",
             name: "Next Codon",
-            model: "haiku",
+            model: "anthropic/claude-haiku-4-5",
             continuationMode: "continue-previous" as const, // Invalid
             promptFile,
           },
@@ -286,7 +286,7 @@ describe("Extension Configuration", () => {
         {
           id: "normal-codon",
           name: "Normal Codon",
-          model: "haiku",
+          model: "anthropic/claude-haiku-4-5",
           continuationMode: "fresh" as const,
           promptFile,
         },
@@ -303,7 +303,7 @@ describe("Extension Configuration", () => {
         {
           id: "normal-codon",
           name: "Normal Codon",
-          model: "haiku",
+          model: "anthropic/claude-haiku-4-5",
           continuationMode: "fresh" as const,
           promptFile,
         },

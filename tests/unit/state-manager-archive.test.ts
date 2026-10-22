@@ -27,7 +27,7 @@ describe("StateManager archive policy", () => {
   const config = {
     id: "work",
     name: "Work",
-    model: "haiku",
+    model: "anthropic/claude-haiku-4-5",
     continuationMode: "fresh",
     promptText: "Work",
     archiveOnSuccess: ["scratch"],

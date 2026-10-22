@@ -4,8 +4,9 @@
  * A `HANKWEAVE_<NAME>` variable in the server's own environment is an
  * instruction for the environment codon agents run in: `HANKWEAVE_FOO=bar`
  * sets `FOO=bar` there, and the literal value "unset" removes `FOO`.
- * `HANKWEAVE_RUNTIME_*` (server config) and `HANKWEAVE_SENTINEL_*` (sentinel
- * API keys) belong to the server and are never passed through.
+ * `HANKWEAVE_RUNTIME_*` (server config), `HANKWEAVE_SENTINEL_*` (sentinel
+ * API keys) and `HANKWEAVE_MODEL_CATALOG_DIR` belong to the server and are
+ * never passed through.
  *
  * Every consumer reads the overlay through {@link hankweaveEnvEntries} so the
  * prefix rules live in one place: the shim, pi and Claude Agent SDK process
@@ -16,6 +17,9 @@ const HANKWEAVE_ENV_PREFIX = "HANKWEAVE_";
 
 /** Server-owned namespaces under the prefix; never part of the overlay. */
 const SERVER_OWNED_PREFIXES = ["HANKWEAVE_RUNTIME_", "HANKWEAVE_SENTINEL_"] as const;
+
+/** Server settings directly under the prefix; never part of the overlay. */
+const SERVER_OWNED_NAMES: ReadonlySet<string> = new Set(["HANKWEAVE_MODEL_CATALOG_DIR"]);
 
 /** The value that marks a variable for removal from the agent environment. */
 export const HANKWEAVE_ENV_UNSET = "unset";
@@ -36,6 +40,7 @@ export function hankweaveEnvEntries(env: NodeJS.ProcessEnv = process.env): Hankw
   for (const [key, value] of Object.entries(env)) {
     if (!key.startsWith(HANKWEAVE_ENV_PREFIX)) continue;
     if (SERVER_OWNED_PREFIXES.some((prefix) => key.startsWith(prefix))) continue;
+    if (SERVER_OWNED_NAMES.has(key)) continue;
     if (value === undefined) continue;
     entries.push({ name: key.slice(HANKWEAVE_ENV_PREFIX.length), value });
   }

@@ -11,6 +11,7 @@ import {
   zstdDecompress,
 } from "node:zlib";
 import { ExecutionLayout } from "../execution-layout.js";
+import { canonicalFilePath } from "../utils.js";
 import { EVENTS_META_FILE } from "./event-storage.js";
 
 /**
@@ -55,54 +56,6 @@ const CAS_ZSTD_LEVEL = 19;
  * prior boot that recycled our pid, and are swept.
  */
 const activeRestoreTmps = new Set<string>();
-
-/**
- * runtime.lock paths THIS process currently holds. Distinguishes a live
- * in-process sibling (own pid AND registered — e.g. two runtimes in one test
- * process) from a recycled leftover (own pid, NOT registered — e.g. a
- * restarted PID-1 container meeting its dead predecessor's lock). The
- * runtime registers on lock creation and releases on lock removal.
- */
-const processOwnedLocks = new Map<string, string>();
-
-/**
- * Filesystem identity, not lexical: symlinked or case-aliased paths to the
- * same file must map to one registry key, or an alias would read a
- * registered path as unregistered. Falls back to canonicalizing the parent
- * directory when the file itself does not exist (a temp about to be
- * written, a lock released after unlink).
- */
-function canonicalFilePath(filePath: string): string {
-  try {
-    return fsSync.realpathSync(filePath);
-  } catch {
-    try {
-      return path.join(fsSync.realpathSync(path.dirname(filePath)), path.basename(filePath));
-    } catch {
-      return path.resolve(filePath);
-    }
-  }
-}
-
-/** Record that this process's runtime holds lockPath, under its ownerToken. */
-export function registerProcessOwnedLock(lockPath: string, ownerToken: string): void {
-  processOwnedLocks.set(canonicalFilePath(lockPath), ownerToken);
-}
-
-/**
- * Release by TOKEN, not path: a dangling-symlink lock can register under its
- * target realpath and later fail to re-derive that key once the link is
- * gone, so path-keyed release would leak the entry forever.
- */
-export function releaseProcessOwnedLock(ownerToken: string): void {
-  for (const [key, token] of processOwnedLocks) {
-    if (token === ownerToken) processOwnedLocks.delete(key);
-  }
-}
-
-export function isProcessOwnedLock(lockPath: string): boolean {
-  return processOwnedLocks.has(canonicalFilePath(lockPath));
-}
 
 const EVENTS_FILE = "events.jsonl";
 const DIETED_JOURNAL_FILE = "events.jsonl.zst";
@@ -225,123 +178,10 @@ export function isDietedEventsDir(eventsDir: string): boolean {
  * CAS is kept: entries are content-addressed and verified on reuse, so the
  * run's next diet deduplicates against them for free.
  *
+ * The calling command holds execution ownership for the entire restore.
+ *
  * Returns the restore report, or null when the directory was not dieted.
  */
-/**
- * Refuse to mutate an events directory whose runtime.lock names a live
- * process — the owner may be mid-run, or mid-shutdown with its finalize diet
- * in flight (promotion → unlink), and touching the journal in that window
- * loses data. Same fail-closed posture as the --diet-journal CLI: a lock we
- * cannot parse refuses too, because liveness is unknown. ESRCH is the only
- * proof of death; EPERM means alive under another uid.
- */
-function assertNoLiveJournalOwner(
-  executionPath: string,
-  action: string,
-  options: {
-    /**
-     * Pass a foreign LIVE pid whose heartbeat is parseably stale. Safe only
-     * where a stalled owner cannot be mid-mutation of what we are about to
-     * touch — the restore path qualifies (a dieted directory means the
-     * owner's journal was already closed and dieted; a live-but-stalled or
-     * pid-recycled "owner" would otherwise wedge auto-restore forever,
-     * since the boot refusal fires before start()'s stale-lock recovery).
-     * The stale-pair prune path must stay strict: that shape can be a
-     * finalize diet mid-promotion.
-     */
-    allowStaleOwner?: boolean;
-  } = {},
-): void {
-  const lockPath = new ExecutionLayout(executionPath).lockPath;
-  let raw: string;
-  try {
-    raw = fsSync.readFileSync(lockPath, "utf-8");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return; // No lock — no owner.
-    }
-    // Present but unreadable (EACCES/EIO): liveness unknown — fail closed,
-    // same as an unparseable lock. Only ENOENT means "no owner".
-    throw new Error(
-      `Journal ${action}: ${lockPath} exists but could not be read ` +
-        `(${(error as Error).message}) — owner liveness is unknown, refusing.`,
-    );
-  }
-  let pid: number | null = null;
-  let heartbeatStale = false;
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    // Only a POSITIVE integer is a pid: on POSIX, kill(-n, 0) probes process
-    // GROUP n, so negative garbage must never reach the liveness check.
-    if (parsed && typeof parsed === "object") {
-      const info = parsed as Record<string, unknown>;
-      const candidate = info.pid;
-      if (typeof candidate === "number" && Number.isInteger(candidate) && candidate > 0) {
-        pid = candidate;
-      }
-      if (typeof info.lastHeartbeat === "string") {
-        const age = Date.now() - new Date(info.lastHeartbeat).getTime();
-        // Unparseable heartbeat stays non-stale (fail closed).
-        heartbeatStale = !Number.isNaN(age) && age > 120000;
-      }
-    } else if (typeof parsed === "number" && Number.isInteger(parsed) && parsed > 0) {
-      pid = parsed; // Legacy bare-pid lock parses as a JSON number.
-    }
-  } catch {
-    const bare = Number(raw.trim());
-    if (Number.isInteger(bare) && bare > 0) pid = bare;
-  }
-  if (pid === null) {
-    throw new Error(
-      `Journal ${action}: ${lockPath} exists but could not be parsed, so owner liveness is ` +
-        `unknown — refusing. Remove the lock file if the runtime is not running.`,
-    );
-  }
-  if (pid === process.pid) {
-    if (isProcessOwnedLock(lockPath)) {
-      // We wrote this lock: a live runtime in THIS process owns the
-      // directory (two in-process runtimes, as integration tests do).
-      throw new Error(
-        `Journal ${action}: this process already holds ${lockPath} — refusing to touch a ` +
-          `directory its own live runtime owns.`,
-      );
-    }
-    if (heartbeatStale) {
-      // A dead predecessor whose pid we recycled wrote it (classically: a
-      // restarted PID-1 container) and its heartbeat has lapsed — kill(0)
-      // on ourselves would read "alive" forever, so pass it through.
-      return;
-    }
-    // Own pid, unregistered, but the heartbeat is fresh or unknown: this
-    // may be a live incumbent in ANOTHER pid namespace sharing the volume
-    // (both containers are PID 1) — pid identity proves nothing across
-    // namespaces. Refuse; a genuine recycled leftover goes stale within
-    // two minutes and then passes.
-    throw new Error(
-      `Journal ${action}: ${lockPath} names this process's pid but was not written by it, ` +
-        `and its heartbeat is not stale — a live owner in another pid namespace may hold it. ` +
-        `Retry after its heartbeat lapses, or remove the lock file if no runtime is running.`,
-    );
-  }
-  let alive = true;
-  try {
-    process.kill(pid, 0);
-  } catch (error) {
-    alive = (error as NodeJS.ErrnoException).code !== "ESRCH";
-  }
-  if (alive) {
-    if (options.allowStaleOwner && heartbeatStale) {
-      // Live pid, lapsed heartbeat: a stalled owner or a recycled pid. The
-      // caller vouched that a stalled owner cannot be mid-mutation here.
-      return;
-    }
-    throw new Error(
-      `Journal ${action}: a live runtime (PID: ${pid}) holds ${lockPath} — refusing to touch ` +
-        `its event journal.`,
-    );
-  }
-}
-
 export async function ensureJournalRestored(
   executionPath: string,
   log: (message: string) => void = () => {},
@@ -353,58 +193,7 @@ export async function ensureJournalRestored(
   const hasMeta = fsSync.existsSync(p.meta);
 
   if (hasJournal) {
-    // While a VALID events.jsonl exists it is the source of truth, so a diet
-    // pair beside it is stale — a crash between a restore's rename and its
-    // prune, or between a diet's meta rename and its unlink. Finish the
-    // prune here: leaving the pair invites a later --restore-journal to
-    // refuse with "does not match the dieted original" once the journal
-    // diverges. UNLESS a live owner holds the directory (a finalize diet
-    // mid-promotion — the pair is about to become the only copy), or the
-    // journal node cannot be PROVEN to carry the pair's content: deleting
-    // the verified restorable copy on the say-so of an unvalidated node
-    // (truncated write, junk, a directory or FIFO squatting the name)
-    // would discard the only good journal.
-    if (hasZst || hasMeta) {
-      assertNoLiveJournalOwner(executionPath, "boot cleanup");
-      const stat = await fs.lstat(p.eventsFile).catch(() => null);
-      if (!stat?.isFile()) {
-        throw new Error(
-          `Journal boot cleanup: ${p.eventsFile} exists but is not a regular file, and diet ` +
-            `artifacts sit beside it — refusing to choose. Inspect the directory by hand.`,
-        );
-      }
-      if (hasMeta) {
-        // The manifest must itself be a regular file before it is READ — a
-        // FIFO (or symlink to a special file) squatting the name would hang
-        // the read forever instead of refusing.
-        const metaStat = await fs.lstat(p.meta).catch(() => null);
-        if (!metaStat?.isFile()) {
-          throw new Error(
-            `Journal boot cleanup: ${p.meta} exists but is not a regular file, and a live ` +
-              `${EVENTS_FILE} sits beside it — refusing to choose. Inspect the directory by hand.`,
-          );
-        }
-        const meta = await readJournalDietMeta(eventsDir);
-        const journalSha = sha256Hex(await fs.readFile(p.eventsFile));
-        if (!meta || journalSha !== meta.originalSha256) {
-          throw new Error(
-            `Journal boot cleanup: ${EVENTS_FILE} in ${eventsDir} does not match the diet ` +
-              `manifest beside it (${journalSha} vs ${meta?.originalSha256 ?? "unparseable meta"}) ` +
-              `— one of them is damaged or foreign. Refusing to delete either; inspect by hand ` +
-              `(hankweave --restore-journal can rebuild from the pair after removing the ` +
-              `mismatched ${EVENTS_FILE}).`,
-          );
-        }
-      }
-      // Proven duplicate content (or an orphan zst that is unrestorable
-      // without a manifest anyway) — the pair is safe to drop.
-      await fs.rm(p.dietedJournal, { force: true });
-      await fs.rm(p.meta, { force: true });
-      log(
-        "Removed a stale diet pair found beside the live events.jsonl " +
-          "(verified duplicate of the journal; interrupted prune or diet)",
-      );
-    }
+    await pruneStaleDietPair(eventsDir, log);
     return null;
   }
 
@@ -436,7 +225,6 @@ export async function ensureJournalRestored(
     }
   }
 
-  assertNoLiveJournalOwner(executionPath, "auto-restore", { allowStaleOwner: true });
   const report = await restoreJournal(eventsDir);
   // Prune the now-stale pair — but only while the journal we just published
   // is still on disk. If a concurrent actor re-dieted in the gap (unlinking
@@ -450,6 +238,70 @@ export async function ensureJournalRestored(
     );
   }
   return report;
+}
+
+/** Validate the live journal before deleting any recovery artifacts beside it. */
+async function pruneStaleDietPair(
+  eventsDir: string,
+  log: (message: string) => void,
+): Promise<void> {
+  const p = dietPaths(eventsDir);
+  const hasZst = fsSync.existsSync(p.dietedJournal);
+  const hasMeta = fsSync.existsSync(p.meta);
+  // While a VALID events.jsonl exists it is the source of truth, so a diet
+  // pair beside it is stale — a crash between a restore's rename and its
+  // prune, or between a diet's meta rename and its unlink. Finish the
+  // prune here: leaving the pair invites a later --restore-journal to
+  // refuse with "does not match the dieted original" once the journal
+  // diverges. UNLESS a live owner holds the directory (a finalize diet
+  // mid-promotion — the pair is about to become the only copy), or the
+  // journal node cannot be PROVEN to carry the pair's content: deleting
+  // the verified restorable copy on the say-so of an unvalidated node
+  // (truncated write, junk, a directory or FIFO squatting the name)
+  // would discard the only good journal.
+  if (!hasZst && !hasMeta) return;
+  const stat = await fs.lstat(p.eventsFile).catch(() => null);
+  if (!stat?.isFile()) {
+    throw new Error(
+      `Journal boot cleanup: ${p.eventsFile} exists but is not a regular file, and diet ` +
+        `artifacts sit beside it — refusing to choose. Inspect the directory by hand.`,
+    );
+  }
+  if (hasMeta) await verifyJournalMatchesDiet(eventsDir);
+  // Proven duplicate content (or an orphan zst that is unrestorable
+  // without a manifest anyway) — the pair is safe to drop.
+  await fs.rm(p.dietedJournal, { force: true });
+  await fs.rm(p.meta, { force: true });
+  log(
+    "Removed a stale diet pair found beside the live events.jsonl " +
+      "(verified duplicate of the journal; interrupted prune or diet)",
+  );
+}
+
+/** Refuse stale-pair cleanup unless the manifest proves the live journal is its duplicate. */
+async function verifyJournalMatchesDiet(eventsDir: string): Promise<void> {
+  const p = dietPaths(eventsDir);
+  // The manifest must itself be a regular file before it is READ — a
+  // FIFO (or symlink to a special file) squatting the name would hang
+  // the read forever instead of refusing.
+  const metaStat = await fs.lstat(p.meta).catch(() => null);
+  if (!metaStat?.isFile()) {
+    throw new Error(
+      `Journal boot cleanup: ${p.meta} exists but is not a regular file, and a live ` +
+        `${EVENTS_FILE} sits beside it — refusing to choose. Inspect the directory by hand.`,
+    );
+  }
+  const meta = await readJournalDietMeta(eventsDir);
+  const journalSha = sha256Hex(await fs.readFile(p.eventsFile));
+  if (!meta || journalSha !== meta.originalSha256) {
+    throw new Error(
+      `Journal boot cleanup: ${EVENTS_FILE} in ${eventsDir} does not match the diet ` +
+        `manifest beside it (${journalSha} vs ${meta?.originalSha256 ?? "unparseable meta"}) ` +
+        `— one of them is damaged or foreign. Refusing to delete either; inspect by hand ` +
+        `(hankweave --restore-journal can rebuild from the pair after removing the ` +
+        `mismatched ${EVENTS_FILE}).`,
+    );
+  }
 }
 
 /** Read + validate journal.meta.json; null when absent or unusable. */
@@ -963,8 +815,7 @@ export async function dietJournal(
     thresholdBytes?: number;
     /**
      * Runs after verification, just before promotion; throwing aborts the
-     * diet with the original intact. The CLI uses it to re-check its
-     * exclusivity claim; tests use it to inject concurrent writes.
+     * diet with the original intact. Used to inject concurrent writes in tests.
      */
     beforePromote?: () => Promise<void> | void;
   } = {},

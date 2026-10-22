@@ -66,7 +66,7 @@ describe("telemetry early-exit opt-out", () => {
           {
             id: "test-codon",
             name: "Test",
-            model: "sonnet",
+            model: "anthropic/claude-sonnet-4-6",
             continuationMode: "fresh",
             promptText: "test",
           },

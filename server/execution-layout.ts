@@ -5,7 +5,8 @@ import path from "node:path";
  *
  * ```
  * <executionPath>/
- *   .hankweave/                       execution-meta.json, state.json, runtime.lock,
+ *   .hankweave-runtime.lock/          command lease (never backed up or copied)
+ *   .hankweave/                       execution-meta.json, state.json,
  *                                     events/, runs/<id>/, archive-manifest.json,
  *                                     checkpoints/.hankweavecheckpoints   (shadow git repo)
  *   agentRoot/                        agent workspace (checkpoint work tree)
@@ -32,6 +33,8 @@ export class ExecutionLayout {
 
   /** Execution state directory, a direct child of the execution directory. */
   static readonly STATE_DIR = ".hankweave";
+  /** Shared lease, outside the state directory renamed by --start-new --force. */
+  static readonly RUNTIME_LOCK = ".hankweave-runtime.lock";
   /** Agent workspace; also the checkpoint repository's work tree. */
   static readonly AGENT_ROOT = "agentRoot";
   /** Destination for archiveOnSuccess / archiveOnLoopComplete. */
@@ -53,7 +56,6 @@ export class ExecutionLayout {
   static readonly EXECUTION_META_FILE = "execution-meta.json";
   static readonly STATE_FILE = "state.json";
   static readonly STATE_BACKUP_FILE = "state.json.bak";
-  static readonly RUNTIME_LOCK_FILE = "runtime.lock";
   static readonly ARCHIVE_MANIFEST_FILE = "archive-manifest.json";
 
   /**
@@ -68,16 +70,6 @@ export class ExecutionLayout {
    */
   static readonly QUARANTINE_PREFIX = `${ExecutionLayout.CHECKPOINT_GIT}-quarantine-`;
 
-  /**
-   * The lock file relative to the execution directory. The config default
-   * before any execution directory exists; the runtime resolves it against
-   * `executionPath` at boot.
-   */
-  static readonly RELATIVE_LOCK_FILE = path.join(
-    ExecutionLayout.STATE_DIR,
-    ExecutionLayout.RUNTIME_LOCK_FILE,
-  );
-
   // -------------
   // Mandatory exclusions
   // -------------
@@ -88,6 +80,7 @@ export class ExecutionLayout {
     dataSource: ExecutionLayout.fold(ExecutionLayout.DATA_SOURCE),
     rigArchive: ExecutionLayout.fold(ExecutionLayout.RIG_ARCHIVE),
     stateDir: ExecutionLayout.fold(ExecutionLayout.STATE_DIR),
+    runtimeLock: ExecutionLayout.fold(ExecutionLayout.RUNTIME_LOCK),
     stateBackupPrefix: ExecutionLayout.fold(ExecutionLayout.STATE_BACKUP_PREFIX),
     checkpointGit: ExecutionLayout.fold(ExecutionLayout.CHECKPOINT_GIT),
     quarantinePrefix: ExecutionLayout.fold(ExecutionLayout.QUARANTINE_PREFIX),
@@ -120,6 +113,7 @@ export class ExecutionLayout {
     return components.some(
       (c) =>
         c === F.stateDir ||
+        c === F.runtimeLock ||
         c.startsWith(F.stateBackupPrefix) ||
         c === F.checkpointGit ||
         c.startsWith(F.quarantinePrefix),
@@ -135,6 +129,7 @@ export class ExecutionLayout {
 /${ExecutionLayout.DATA_SOURCE}/
 /${ExecutionLayout.RIG_ARCHIVE}/
 /${ExecutionLayout.STATE_DIR}/
+/${ExecutionLayout.RUNTIME_LOCK}/
 /${ExecutionLayout.STATE_BACKUP_PREFIX}*/
 `;
 
@@ -190,6 +185,7 @@ ${ExecutionLayout.RIG_ARCHIVE}/
   readonly executionPath: string;
   /** `<executionPath>/.hankweave` */
   readonly stateDir: string;
+  readonly runtimeLockPath: string;
   /** The agent's working directory: `<executionPath>/agentRoot` unless the
    * caller overrides it (tests that run the work tree at the execution
    * directory itself — the flat layout the mandatory exclusions defend). */
@@ -208,8 +204,6 @@ ${ExecutionLayout.RIG_ARCHIVE}/
   readonly statePath: string;
   /** `<executionPath>/.hankweave/state.json.bak` */
   readonly stateBackupPath: string;
-  /** `<executionPath>/.hankweave/runtime.lock` */
-  readonly lockPath: string;
   /** `<executionPath>/.hankweave/events` */
   readonly eventsDir: string;
   /** `<executionPath>/.hankweave/runs` */
@@ -226,6 +220,7 @@ ${ExecutionLayout.RIG_ARCHIVE}/
   constructor(executionPath: string, options: { agentRootPath?: string } = {}) {
     this.executionPath = executionPath;
     this.stateDir = path.join(executionPath, ExecutionLayout.STATE_DIR);
+    this.runtimeLockPath = path.join(executionPath, ExecutionLayout.RUNTIME_LOCK);
     this.agentRootPath =
       options.agentRootPath ?? path.join(executionPath, ExecutionLayout.AGENT_ROOT);
     this.rigArchivePath = path.join(executionPath, ExecutionLayout.RIG_ARCHIVE);
@@ -235,7 +230,6 @@ ${ExecutionLayout.RIG_ARCHIVE}/
     this.metaPath = path.join(this.stateDir, ExecutionLayout.EXECUTION_META_FILE);
     this.statePath = path.join(this.stateDir, ExecutionLayout.STATE_FILE);
     this.stateBackupPath = path.join(this.stateDir, ExecutionLayout.STATE_BACKUP_FILE);
-    this.lockPath = path.join(this.stateDir, ExecutionLayout.RUNTIME_LOCK_FILE);
     this.eventsDir = path.join(this.stateDir, ExecutionLayout.EVENTS);
     this.runsDir = path.join(this.stateDir, ExecutionLayout.RUNS);
     this.archiveManifestPath = path.join(this.stateDir, ExecutionLayout.ARCHIVE_MANIFEST_FILE);

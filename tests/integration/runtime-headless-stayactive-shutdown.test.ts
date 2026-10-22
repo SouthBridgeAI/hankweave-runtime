@@ -6,7 +6,7 @@
  * timeout). resolveFailureAction maps abort+retriable -> "stay-active", whose
  * intent is to park the server so an INTERACTIVE client can issue a manual
  * retry. Under --headless there is no such client, so the server parked forever
- * holding runtime.lock, and the parent process waiting on it hung too.
+ * holding the execution lock, and the parent process waiting on it hung too.
  *
  * Fix: in headless mode "stay-active" must fail the run and shut down (the
  * shutdown watchdog then guarantees the process exits) instead of parking.
@@ -19,6 +19,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
 import { HankweaveRuntime } from "../../server/hankweave-runtime.js";
+import { RuntimeLock } from "../../server/runtime-lock.js";
 import { CodonId, RunId } from "../../server/types/branded-types.js";
 import type { FailureReason } from "../../server/types/types.js";
 import { createTestCodon } from "../utils/test-codon-factory.js";
@@ -26,43 +27,47 @@ import { createTestCodon } from "../utils/test-codon-factory.js";
 describe("Runtime: headless stay-active must shut down, not hang", () => {
   let execDir: string;
   let runtime: HankweaveRuntime | undefined;
+  let lock: RuntimeLock;
 
   const makeRuntime = (headless: boolean): HankweaveRuntime =>
-    new HankweaveRuntime({
-      autostart: false,
-      headless,
-      port: 0,
-      cwd: execDir,
-      executionPath: execDir,
-      agentRootPath: execDir,
-      rigArchivePath: path.join(execDir, "rigArchive"),
-      dataPathInExecutionDir: execDir,
-      readOnlySourceDataPath: execDir,
-      dataHash: "test-hash",
-      isNewExecution: true,
-      isResuming: false,
-      linkType: "symlink",
-      codons: [],
-      socketLogFile: path.join(execDir, ".hankweave/logs/socket.jsonl"),
-      serverLogFile: path.join(execDir, ".hankweave/logs/server.log"),
-      outputDirectory: execDir,
-      sentinel: {
-        enablePersistence: false,
-        healthCheckGracePeriodMs: 0,
-        waitForAllHealthChecks: false,
+    new HankweaveRuntime(
+      {
+        autostart: false,
+        headless,
+        port: 0,
+        cwd: execDir,
+        executionPath: execDir,
+        agentRootPath: execDir,
+        rigArchivePath: path.join(execDir, "rigArchive"),
+        dataPathInExecutionDir: execDir,
+        readOnlySourceDataPath: execDir,
+        dataHash: "test-hash",
+        isNewExecution: true,
+        isResuming: false,
+        linkType: "symlink",
+        codons: [],
+        socketLogFile: path.join(execDir, ".hankweave/logs/socket.jsonl"),
+        serverLogFile: path.join(execDir, ".hankweave/logs/server.log"),
+        outputDirectory: execDir,
+        sentinel: {
+          enablePersistence: false,
+          healthCheckGracePeriodMs: 0,
+          waitForAllHealthChecks: false,
+        },
+        logParsingInterval: 5,
+        dataHashTimeLimit: 5000,
+        toolResultTruncateLength: 2500,
+        withoutProxy: true,
+        handshakeHistoryLimit: 50,
+        version: "1.0.0",
       },
-      logParsingInterval: 5,
-      dataHashTimeLimit: 5000,
-      toolResultTruncateLength: 2500,
-      withoutProxy: true,
-      handshakeHistoryLimit: 50,
-      version: "1.0.0",
-      lockFile: path.join(execDir, ".hankweave/runtime.lock"),
-    });
+      lock,
+    );
 
-  beforeEach(() => {
+  beforeEach(async () => {
     fs.mkdirSync(path.resolve("tests", "test-area"), { recursive: true });
     execDir = fs.mkdtempSync(path.resolve("tests", "test-area", "rt-headless-stayactive-"));
+    lock = await RuntimeLock.acquire(execDir);
     fs.mkdirSync(path.join(execDir, ".hankweave", "logs"), { recursive: true });
     fs.mkdirSync(path.join(execDir, ".hankweave", "events"), {
       recursive: true,
@@ -80,6 +85,7 @@ describe("Runtime: headless stay-active must shut down, not hang", () => {
       // never started a server; best-effort cleanup
     }
     runtime = undefined;
+    await lock.release();
     fs.rmSync(execDir, { recursive: true, force: true });
   });
 
@@ -97,7 +103,7 @@ describe("Runtime: headless stay-active must shut down, not hang", () => {
     const codon = createTestCodon({
       id: "analyze-failure",
       name: "Analyze failure",
-      model: "sonnet",
+      model: "anthropic/claude-sonnet-4-6",
       continuationMode: "fresh",
       promptText: "Test prompt",
     });

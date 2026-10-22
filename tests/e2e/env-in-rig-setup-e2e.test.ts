@@ -4,8 +4,7 @@
  * to `rigSetup` commands on the same codon.
  *
  * Bug: When a codon defines an `env` block, those variables are only
- * injected into the Claude/shim process environment (via buildEnvironment
- * in shim-process-manager.ts). The `runCommand()` method in
+ * injected into the agent execution environment. The `runCommand()` method in
  * hankweave-runtime.ts spawns rigSetup commands without passing the
  * codon's env, so shell expansions like ${MY_VAR} resolve to empty strings.
  *

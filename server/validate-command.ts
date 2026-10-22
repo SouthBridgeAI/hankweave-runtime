@@ -5,7 +5,7 @@ import type { ValidationResult } from "./config.js";
 import { DEFAULT_CONFIG, ensureSchemaUrl, validateHank } from "./config.js";
 import { hashDataSource } from "./data-hasher.js";
 import { ExecutionLayout } from "./execution-layout.js";
-import { LlmProviderRegistry } from "./llm/llm-provider-registry.js";
+import { Models } from "./llm/index.js";
 import { formatEnvVarForDisplay, getManagedExecutionsRoot, Logger } from "./utils.js";
 import { renderHankStructure } from "./validate-ascii.js";
 import { renderBudgetResolutionTable } from "./validate-budget.js";
@@ -77,6 +77,12 @@ function displayValidationResult(options: ValidationDisplayOptions): void {
 
   console.log(structure);
   console.log("");
+
+  const modelTable = Models.current().report();
+  if (modelTable.length > 0) {
+    console.log(modelTable.join("\n"));
+    console.log("");
+  }
 
   // Summary box with rounded corners
   const useColor = process.stdout.isTTY ?? false;
@@ -189,8 +195,12 @@ export interface ValidateOptions {
   originalUrl?: string;
   /** Preserve verified bundle bytes, including during replay. */
   skipSchemaRewrite?: boolean;
-  /** Resolved budget from all config layers (runtime, hank, CLI) for accurate ceiling display */
-  resolvedBudget?: { maxDollars?: number; maxTimeSeconds?: number };
+  /** Resolved budget from all config layers (runtime, hank, CLI): ceiling display and price policy */
+  resolvedBudget?: {
+    maxDollars?: number;
+    maxTimeSeconds?: number;
+    unpricedModels?: "estimate" | "refuse";
+  };
 }
 
 /**
@@ -231,11 +241,7 @@ export async function runValidation(options: ValidateOptions): Promise<void> {
     path.join(os.tmpdir(), `hankweave-validation-${Date.now()}.log`),
   );
 
-  // 5. Initialize LLM Provider Registry (required before validation can run)
-  LlmProviderRegistry.getInstance({
-    logger: validationLogger,
-    performHealthCheckOnInit: false,
-  });
+  Models.current().attachLogger(validationLogger);
 
   addValidationSchema(configPath, options.skipSchemaRewrite);
 
@@ -250,6 +256,7 @@ export async function runValidation(options: ValidateOptions): Promise<void> {
     executionPath: paths.executionPath,
     logger: validationLogger,
     modelOverride, // Pass through CLI model override if provided
+    budgetPolicy: options.resolvedBudget,
   });
 
   // 9. Display results

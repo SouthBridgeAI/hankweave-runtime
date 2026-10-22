@@ -61,7 +61,7 @@ describe("Sentinel Output Files - Integration Tests", () => {
         trigger: { type: "event", on: ["assistant.action"] },
         execution: { strategy: "immediate" },
         userPromptText: "Summarize: <%= JSON.stringify(it.events) %>",
-        model: "test-model",
+        model: "anthropic/claude-haiku-4-5",
         joinString: "\n---\n",
       };
 
@@ -122,7 +122,7 @@ describe("Sentinel Output Files - Integration Tests", () => {
         trigger: { type: "event", on: ["file.updated"] },
         execution: { strategy: "immediate" },
         userPromptText: "Extract entities",
-        model: "test-model",
+        model: "anthropic/claude-haiku-4-5",
         structuredOutput: {
           output: "object",
           schemaStr: "z.object({ name: z.string(), type: z.string() })",
@@ -200,7 +200,7 @@ describe("Sentinel Output Files - Integration Tests", () => {
         trigger: { type: "event", on: ["codon.completed"] },
         execution: { strategy: "immediate" },
         userPromptText: "Track progress",
-        model: "test-model",
+        model: "anthropic/claude-haiku-4-5",
       };
 
       // Simulate Codon 1
@@ -302,7 +302,7 @@ describe("Sentinel Output Files - Integration Tests", () => {
         trigger: { type: "event", on: ["assistant.action"] },
         execution: { strategy: "immediate" },
         userPromptText: "Log event",
-        model: "test-model",
+        model: "anthropic/claude-haiku-4-5",
         joinString: "\\n=====\\n", // Newline, separator, newline
       };
 
@@ -359,7 +359,7 @@ describe("Sentinel Output Files - Integration Tests", () => {
         trigger: { type: "event", on: ["assistant.action"] },
         execution: { strategy: "immediate" },
         userPromptText: "Narrate",
-        model: "test-model",
+        model: "anthropic/claude-haiku-4-5",
       };
 
       const structuredSentinel: SentinelConfig = {
@@ -368,7 +368,7 @@ describe("Sentinel Output Files - Integration Tests", () => {
         trigger: { type: "event", on: ["assistant.action"] },
         execution: { strategy: "immediate" },
         userPromptText: "Track metrics",
-        model: "test-model",
+        model: "anthropic/claude-haiku-4-5",
         structuredOutput: {
           output: "object",
           schemaStr: "z.object({ count: z.number() })",
@@ -433,7 +433,7 @@ describe("Sentinel Output Files - Integration Tests", () => {
         execution: { strategy: "immediate" },
         systemPromptText: "You are a narrator",
         userPromptText: "Continue the story",
-        model: "test-model",
+        model: "anthropic/claude-haiku-4-5",
         conversational: {
           trimmingStrategy: { type: "maxTurns", maxTurns: 5 },
         },
@@ -493,7 +493,7 @@ describe("Sentinel Output Files - Integration Tests", () => {
         trigger: { type: "event", on: ["assistant.action"] },
         execution: { strategy: "immediate" },
         userPromptText: "Test",
-        model: "test-model",
+        model: "anthropic/claude-haiku-4-5",
       };
 
       const manager = new SentinelManager({ enablePersistence: false });
@@ -542,7 +542,7 @@ describe("Sentinel Output Files - Integration Tests", () => {
         trigger: { type: "event", on: ["assistant.action"] },
         execution: { strategy: "immediate" },
         userPromptText: "Auto log",
-        model: "test-model",
+        model: "anthropic/claude-haiku-4-5",
       };
 
       const manager = new SentinelManager({ enablePersistence: false });
@@ -591,7 +591,7 @@ describe("Sentinel Output Files - Integration Tests", () => {
         trigger: { type: "event", on: ["assistant.action"] },
         execution: { strategy: "immediate" },
         userPromptText: "Summarize: <%= JSON.stringify(it.events) %>",
-        model: "test-model",
+        model: "anthropic/claude-haiku-4-5",
         output: {
           file: "my-sentinel-log.md",
         },
@@ -639,7 +639,7 @@ describe("Sentinel Output Files - Integration Tests", () => {
         trigger: { type: "event", on: ["assistant.action"] },
         execution: { strategy: "immediate" },
         userPromptText: "Log it",
-        model: "test-model",
+        model: "anthropic/claude-haiku-4-5",
         output: {
           file: "./sentinel-notes/analysis.md",
         },
@@ -676,7 +676,7 @@ describe("Sentinel Output Files - Integration Tests", () => {
         trigger: { type: "event", on: ["assistant.action"] },
         execution: { strategy: "immediate" },
         userPromptText: "Test",
-        model: "test-model",
+        model: "anthropic/claude-haiku-4-5",
         output: {
           file: "sentinel-default.md",
         },
@@ -733,7 +733,7 @@ describe("Sentinel Output Files - Integration Tests", () => {
         trigger: { type: "event", on: ["assistant.action"] },
         execution: { strategy: "immediate" },
         userPromptText: "Analyze",
-        model: "test-model",
+        model: "anthropic/claude-haiku-4-5",
         output: {
           format: "jsonl",
           file: "analysis.jsonl",

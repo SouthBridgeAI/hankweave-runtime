@@ -13,6 +13,8 @@ import {
   codonSentinelEntrySchema,
   sentinelConfigSchema,
 } from "../../server/config-validation/sentinel.schema.js";
+import { modelHarnesses } from "../../server/harnesses.js";
+import { Models } from "../../server/llm/index.js";
 import {
   computeClosure,
   extendClosure,
@@ -699,6 +701,51 @@ describe("loader gate: a hank that fails to load fails to pack (spec 63 / doc 64
   });
 });
 
+describe("models: a hank packs with the models it runs with", () => {
+  afterEach(() => {
+    // computeClosure installs a parse-mode Models over the hank's models
+    // block; every other test expects the preload's bundled-catalog instance.
+    Models.loadForParsing({}, { harnesses: modelHarnesses(), bundledOnly: true });
+  });
+
+  it("packs a hank whose codon model only its own models block declares", () => {
+    const { hankDir } = copyFixture();
+    editHankJson(hankDir, (raw) => {
+      raw.models = [
+        { id: "anthropic/claude-pack-only-1", limit: { context: 200000, output: 64000 } },
+      ];
+      raw.hank[0].model = "anthropic/claude-pack-only-1";
+    });
+    const closure = computeClosure(hankDir);
+    expect(closure.findings.filter((f) => f.severity === "error")).toEqual([]);
+    expect(closure.ok).toBe(true);
+  });
+
+  it("warns about a models entry the catalog cannot use", () => {
+    const { hankDir } = copyFixture();
+    editHankJson(hankDir, (raw) => {
+      raw.models = [{ id: "anthropic/claude-pack-only-2", basedOn: "anthropic/claude-nowhere-0" }];
+    });
+    const closure = computeClosure(hankDir);
+    expect(closure.ok).toBe(true);
+    const warning = closure.findings.find((f) => f.category === "models-block");
+    expect(warning?.severity).toBe("warn");
+    expect(warning?.detail).toContain("'anthropic/claude-nowhere-0'");
+  });
+
+  it("warns about a models entry for a provider the catalog does not list", () => {
+    const { hankDir } = copyFixture();
+    editHankJson(hankDir, (raw) => {
+      raw.models = [{ id: "brand-new-cloud/model-a", limit: { context: 1000, output: 100 } }];
+    });
+    const closure = computeClosure(hankDir);
+    expect(closure.ok).toBe(true);
+    const warning = closure.findings.find((f) => f.category === "models-block");
+    expect(warning?.severity).toBe("warn");
+    expect(warning?.detail).toContain("names provider 'brand-new-cloud'");
+  });
+});
+
 describe("walker-side strict-ref enforcement on captured bytes (TOCTOU defense)", () => {
   /**
    * The loader gate validates its OWN read of each config, while the walk
@@ -1363,6 +1410,10 @@ describe("schema-drift canary (codebase-delta item 3, issue 06)", () => {
     "hankFile.meta.description",
     "hankFile.meta.name",
     "hankFile.meta.version",
+    // Model catalog records (spec 70): model ids and display names, not paths.
+    "hankFile.models.basedOn",
+    "hankFile.models.id",
+    "hankFile.models.name",
     "hankFile.overrides.model",
     "hankFile.requirements.env",
     "hankFile.requirements.tools",

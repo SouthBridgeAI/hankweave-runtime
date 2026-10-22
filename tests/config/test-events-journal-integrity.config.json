@@ -6,7 +6,7 @@
       "name": "Divergent matcher codon",
       "description": "Writes a root, deep-basename, and gitignored file; only the root write may be journaled",
       "promptText": "Use the Write tool exactly three times, once per file, in this order. 1. Create the file <%PROJECT_DIR%>/root-control.md with exactly this text: LIVE_ROOT_CONTROL_BODY 2. Create the file <%PROJECT_DIR%>/deep/dir/nested.md with exactly this text: LIVE_DEEP_BASENAME_BODY 3. Create the file <%PROJECT_DIR%>/output/tmp/ignored.md with exactly this text: LIVE_GITIGNORED_BODY Do not use Read, Edit, Bash, or any other tool. After all three Writes succeed, reply with exactly WRITES_DONE.",
-      "model": "haiku",
+      "model": "anthropic/claude-haiku-4-5",
       "continuationMode": "fresh",
       "rigSetup": [
         {
@@ -24,7 +24,7 @@
       "name": "Read-only codon",
       "description": "Reads a pre-existing watched file; must not journal a fabricated 'modified' event",
       "promptText": "Use the Read tool exactly once to read the file <%PROJECT_DIR%>/watched.md. Do not use Write, Edit, Bash, or any other tool. Do not create or modify any file. After the Read succeeds, reply with exactly READ_DONE.",
-      "model": "haiku",
+      "model": "anthropic/claude-haiku-4-5",
       "continuationMode": "fresh",
       "rigSetup": [
         {
@@ -42,7 +42,7 @@
       "name": "Watching codon A",
       "description": "Watches *.txt and is held inside outputFiles.beforeCopy until .release-a appears",
       "promptText": "Reply with exactly A_DONE. Do not call any tools or modify files.",
-      "model": "haiku",
+      "model": "anthropic/claude-haiku-4-5",
       "continuationMode": "fresh",
       "rigSetup": [
         {
@@ -74,7 +74,7 @@
       "name": "Unwatched codon B",
       "description": "Declares no checkpointedFiles; its Write must not be journaled",
       "promptText": "Use the Write tool exactly once to create the new file <%PROJECT_DIR%>/created-by-b.txt with exactly this text: LIVE_CODON_B_WROTE_THIS. Do not use Read, Edit, Bash, or any other tool. After Write succeeds, reply with exactly B_DONE.",
-      "model": "haiku",
+      "model": "anthropic/claude-haiku-4-5",
       "continuationMode": "fresh"
     }
   ]

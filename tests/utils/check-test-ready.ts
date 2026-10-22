@@ -56,13 +56,15 @@ checks.push({
   message: serverExists ? "Server found" : "Server file missing",
 });
 
-// Check 5: No lock file (no server running)
-const lockFile = "tests/test-area/.hankweave/runtime.lock";
-const noLockFile = !fs.existsSync(lockFile);
+// Check 5: No execution lock directory (no command using the test area)
+const lockDir = "tests/test-area.lock";
+const noLockDir = !fs.existsSync(lockDir);
 checks.push({
-  name: "Server lock file",
-  pass: noLockFile,
-  message: noLockFile ? "No server running" : "Server may already be running (lock file exists)",
+  name: "Server lock directory",
+  pass: noLockDir,
+  message: noLockDir
+    ? "No server running"
+    : "Server may already be running (lock directory exists)",
 });
 
 // Check 6: Claude CLI available
@@ -105,8 +107,10 @@ if (ready) {
       `\n${colors.yellow}Fix: Install Claude CLI - https://docs.anthropic.com/en/docs/claude-code${colors.reset}`,
     );
   }
-  if (!noLockFile) {
-    console.log(`\n${colors.yellow}Fix: rm ${lockFile}${colors.reset}`);
+  if (!noLockDir) {
+    console.log(
+      `\n${colors.yellow}Fix: Stop commands using tests/test-area; if the lock remains, run rmdir ${lockDir}${colors.reset}`,
+    );
   }
 }
 console.log("");

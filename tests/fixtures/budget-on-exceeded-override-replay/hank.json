@@ -8,7 +8,7 @@
       "id": "override-codon",
       "name": "Override to Complete",
       "promptText": "Write a detailed essay about the history of computing. Make it at least 2000 words.",
-      "model": "haiku",
+      "model": "anthropic/claude-haiku-4-5",
       "budget": { "onExceeded": "complete" },
       "continuationMode": "fresh"
     },
@@ -16,7 +16,7 @@
       "id": "followup-codon",
       "name": "Followup",
       "promptText": "Say exactly: hello world",
-      "model": "haiku",
+      "model": "anthropic/claude-haiku-4-5",
       "continuationMode": "fresh"
     }
   ]

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
@@ -382,5 +382,60 @@ describe("SentinelManager - Large Tasks", () => {
 
       // Cost tracking is integrated (demonstrates Task 2) - verified by type system
     });
+  });
+});
+
+// Replay never contacts a provider (spec 72): the runtime passes
+// skipProviderHealthChecks for a replay, and no health check may run.
+describe("SentinelManager - replay hermeticity", () => {
+  const sentinelConfig: SentinelConfig = {
+    id: "replayed",
+    name: "Replayed",
+    model: "anthropic/claude-3-5-sonnet-20241022",
+    trigger: { type: "event", on: ["assistant.action"] },
+    execution: { strategy: "immediate" },
+    userPromptText: "Test",
+  };
+
+  async function managerWith(skipProviderHealthChecks: boolean) {
+    const logger = new MockLogger();
+    const providerRegistry = new MockLlmProviderRegistry();
+    const healthChecks = spyOn(providerRegistry, "performHealthChecks");
+    const manager = createTestSentinelManager({
+      logger,
+      providerRegistry,
+      skipProviderHealthChecks,
+      waitForHealthChecks: true,
+    });
+    const mockLlm = createMockLlm();
+    await manager.loadSentinelsForCodon([sentinelConfig], "test-codon" as CodonId, {
+      llmCallOverride: async (_id: string, options: HankweaveGenerateTextOptions) =>
+        mockLlm.generateText(options),
+    });
+    return { manager, logger, healthChecks };
+  }
+
+  test("skipProviderHealthChecks never calls performHealthChecks, and says so", async () => {
+    const { manager, logger, healthChecks } = await managerWith(true);
+
+    expect(healthChecks).not.toHaveBeenCalled();
+    expect(logger.logs).toContainEqual({
+      message: "Skipping provider health checks (replay: no provider calls)",
+      level: "info",
+    });
+    expect(logger.logs.some((log) => log.message.includes("Initializing LLM Provider"))).toBe(
+      false,
+    );
+    await manager.shutdown();
+  });
+
+  test("without it, the health checks run", async () => {
+    const { manager, logger, healthChecks } = await managerWith(false);
+
+    expect(healthChecks).toHaveBeenCalledTimes(1);
+    expect(logger.logs.some((log) => log.message.includes("Skipping provider health checks"))).toBe(
+      false,
+    );
+    await manager.shutdown();
   });
 });

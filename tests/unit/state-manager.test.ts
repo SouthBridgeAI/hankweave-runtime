@@ -590,14 +590,14 @@ describe("StateManager", () => {
         createTestCodon({
           id: "named",
           name: "Configured name",
-          model: "sonnet",
+          model: "anthropic/claude-sonnet-4-6",
           continuationMode: "fresh",
           promptText: "test",
         }),
         createTestCodon({
           id: "loop",
           name: "Loop base name",
-          model: "sonnet",
+          model: "anthropic/claude-sonnet-4-6",
           continuationMode: "fresh",
           promptText: "test",
         }),
@@ -1103,7 +1103,7 @@ describe("StateManager", () => {
             {
               id: "work",
               name: "Work",
-              model: "sonnet",
+              model: "anthropic/claude-sonnet-4-6",
               continuationMode: "fresh",
               promptText: "Do work",
             },
@@ -1166,7 +1166,7 @@ describe("StateManager", () => {
             {
               id: "codon",
               name: "Codon",
-              model: "sonnet",
+              model: "anthropic/claude-sonnet-4-6",
               continuationMode: "fresh",
               promptText: "Test",
             },
@@ -1223,7 +1223,7 @@ describe("StateManager", () => {
             {
               id: "p",
               name: "P",
-              model: "sonnet",
+              model: "anthropic/claude-sonnet-4-6",
               continuationMode: "fresh",
               promptText: "P",
             },
@@ -1284,7 +1284,7 @@ describe("StateManager", () => {
             {
               id: "p",
               name: "P",
-              model: "sonnet",
+              model: "anthropic/claude-sonnet-4-6",
               continuationMode: "fresh",
               promptText: "P",
             },
@@ -1334,7 +1334,7 @@ describe("StateManager", () => {
             {
               id: "work",
               name: "Work",
-              model: "sonnet",
+              model: "anthropic/claude-sonnet-4-6",
               continuationMode: "fresh",
               promptText: "Do work",
             },
@@ -1378,7 +1378,7 @@ describe("StateManager", () => {
             {
               id: "work",
               name: "Work",
-              model: "sonnet",
+              model: "anthropic/claude-sonnet-4-6",
               continuationMode: "fresh",
               promptText: "Do work",
             },
@@ -1417,7 +1417,7 @@ describe("StateManager", () => {
         createTestCodon({
           id: "regular",
           name: "Regular Codon",
-          model: "sonnet",
+          model: "anthropic/claude-sonnet-4-6",
           continuationMode: "fresh",
           promptText: "Do work",
         }),
@@ -1476,14 +1476,14 @@ describe("StateManager", () => {
             {
               id: "codon1",
               name: "Codon 1",
-              model: "sonnet",
+              model: "anthropic/claude-sonnet-4-6",
               continuationMode: "fresh",
               promptText: "P1",
             },
             {
               id: "codon2",
               name: "Codon 2",
-              model: "sonnet",
+              model: "anthropic/claude-sonnet-4-6",
               continuationMode: "fresh",
               promptText: "P2",
             },
@@ -1527,7 +1527,7 @@ describe("StateManager", () => {
             {
               id: "work1",
               name: "Work 1",
-              model: "sonnet",
+              model: "anthropic/claude-sonnet-4-6",
               continuationMode: "fresh",
               promptText: "W1",
             },
@@ -1542,7 +1542,7 @@ describe("StateManager", () => {
             {
               id: "work2",
               name: "Work 2",
-              model: "sonnet",
+              model: "anthropic/claude-sonnet-4-6",
               continuationMode: "fresh",
               promptText: "W2",
             },
@@ -1588,7 +1588,7 @@ describe("StateManager", () => {
             {
               id: "p",
               name: "P",
-              model: "sonnet",
+              model: "anthropic/claude-sonnet-4-6",
               continuationMode: "fresh",
               promptText: "P",
             },

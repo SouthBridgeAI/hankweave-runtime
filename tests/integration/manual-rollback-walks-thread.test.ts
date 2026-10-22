@@ -17,6 +17,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { ExecutionLayout } from "../../server/execution-layout.js";
 import { HankweaveRuntime } from "../../server/hankweave-runtime.js";
+import { RuntimeLock } from "../../server/runtime-lock.js";
 import { StateManager } from "../../server/state-manager.js";
 import { CodonId, RunId, SessionId } from "../../server/types/branded-types.js";
 import type * as ST from "../../server/types/state-types.js";
@@ -28,16 +29,24 @@ import { createTestCodon } from "../utils/test-codon-factory.js";
 
 const ids = ["one", "two", "three"];
 const codons = ids.map((id) =>
-  createTestCodon({ id, name: id, model: "sonnet", continuationMode: "fresh", promptText: id }),
+  createTestCodon({
+    id,
+    name: id,
+    model: "anthropic/claude-sonnet-4-6",
+    continuationMode: "fresh",
+    promptText: id,
+  }),
 );
 
 let execDir: string;
 let hankweaveDir: string;
 let runtime: HankweaveRuntime | undefined;
+let lock: RuntimeLock;
 
-beforeEach(() => {
+beforeEach(async () => {
   fs.mkdirSync(path.resolve("tests", "test-area"), { recursive: true });
   execDir = fs.mkdtempSync(path.resolve("tests", "test-area", "manual-rollback-walk-"));
+  lock = await RuntimeLock.acquire(execDir);
   hankweaveDir = path.join(execDir, ".hankweave");
   for (const d of ["logs", "events", "runs", "checkpoints"]) {
     fs.mkdirSync(path.join(hankweaveDir, d), { recursive: true });
@@ -51,6 +60,7 @@ afterEach(async () => {
     // best-effort
   }
   runtime = undefined;
+  await lock.release();
   fs.rmSync(execDir, { recursive: true, force: true });
 });
 
@@ -125,37 +135,39 @@ test("rollback.toCodon emits a rollback.codonCheckpoint event for every codon it
   await fire({ type: "RunCompleted", data: { runId } });
 
   // 3. Boot (autostart off), then roll back to the first codon by command.
-  runtime = new HankweaveRuntime({
-    autostart: false,
-    headless: true,
-    port: 0,
-    cwd: execDir,
-    executionPath: execDir,
-    agentRootPath: execDir,
-    rigArchivePath: path.join(execDir, "rigArchive"),
-    dataPathInExecutionDir: execDir,
-    readOnlySourceDataPath: execDir,
-    dataHash: "test-hash",
-    isNewExecution: false,
-    isResuming: true,
-    linkType: "symlink",
-    codons,
-    socketLogFile: path.join(hankweaveDir, "logs/socket.jsonl"),
-    serverLogFile: path.join(hankweaveDir, "logs/server.log"),
-    outputDirectory: execDir,
-    sentinel: {
-      enablePersistence: false,
-      healthCheckGracePeriodMs: 0,
-      waitForAllHealthChecks: false,
+  runtime = new HankweaveRuntime(
+    {
+      autostart: false,
+      headless: true,
+      port: 0,
+      cwd: execDir,
+      executionPath: execDir,
+      agentRootPath: execDir,
+      rigArchivePath: path.join(execDir, "rigArchive"),
+      dataPathInExecutionDir: execDir,
+      readOnlySourceDataPath: execDir,
+      dataHash: "test-hash",
+      isNewExecution: false,
+      isResuming: true,
+      linkType: "symlink",
+      codons,
+      socketLogFile: path.join(hankweaveDir, "logs/socket.jsonl"),
+      serverLogFile: path.join(hankweaveDir, "logs/server.log"),
+      outputDirectory: execDir,
+      sentinel: {
+        enablePersistence: false,
+        healthCheckGracePeriodMs: 0,
+        waitForAllHealthChecks: false,
+      },
+      logParsingInterval: 5,
+      dataHashTimeLimit: 5000,
+      toolResultTruncateLength: 2500,
+      withoutProxy: true,
+      handshakeHistoryLimit: 50,
+      version: "1.0.0",
     },
-    logParsingInterval: 5,
-    dataHashTimeLimit: 5000,
-    toolResultTruncateLength: 2500,
-    withoutProxy: true,
-    handshakeHistoryLimit: 50,
-    version: "1.0.0",
-    lockFile: path.join(hankweaveDir, "runtime.lock"),
-  });
+    lock,
+  );
   const events: ServerEvent[] = [];
   runtime.on("event", (e: ServerEvent) => events.push(e));
   await runtime.start();

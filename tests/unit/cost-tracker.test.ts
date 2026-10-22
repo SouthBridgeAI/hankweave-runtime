@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { CostTracker, type CostTrackerEvents } from "../../server/cost-tracker.js";
-import type { LlmProviderRegistry } from "../../server/llm/llm-provider-registry.js";
-import type { ModelInfo } from "../../server/llm/models-dev-schema.js";
+import type { ModelInfo } from "../../server/llm/index.js";
+import { CatalogIndex } from "../../server/llm/internal/catalog-index.js";
 import { Logger } from "../../server/utils.js";
 
 function createModel(overrides: Partial<ModelInfo> = {}): ModelInfo {
@@ -13,19 +13,9 @@ function createModel(overrides: Partial<ModelInfo> = {}): ModelInfo {
     reasoning: true,
     tool_call: true,
     temperature: true,
-    cost: {
-      input: 0.435,
-      output: 0.87,
-      cache_read: 0.003625,
-    },
-    limit: {
-      context: 1_000_000,
-      output: 384_000,
-    },
-    modalities: {
-      input: ["text"],
-      output: ["text"],
-    },
+    cost: { input: 1, output: 2 },
+    limit: { context: 1_000_000, output: 384_000 },
+    modalities: { input: ["text"], output: ["text"] },
     release_date: "2026-01-01",
     last_updated: "2026-01-01",
     ...overrides,
@@ -38,216 +28,276 @@ function createLogger(): Logger {
   return logger;
 }
 
-function createRegistry(costs: Record<string, number | null>) {
-  const calls: Array<{
-    modelName: string;
-    usage: {
-      inputTokens: number;
-      outputTokens: number;
-      cacheReadTokens?: number;
-      cacheCreationTokens?: number;
-    };
-  }> = [];
-
-  const registry = {
-    calculateCost: (
-      modelName: string,
-      usage: {
-        inputTokens: number;
-        outputTokens: number;
-        cacheReadTokens?: number;
-        cacheCreationTokens?: number;
-      },
-    ) => {
-      calls.push({ modelName, usage });
-      return costs[modelName] ?? null;
-    },
-  } as unknown as LlmProviderRegistry;
-
-  return { registry, calls };
+/** A real catalog index over fixture rows: pricing goes through the same exact lookup as production. */
+function registryWith(rows: ModelInfo[]): CatalogIndex {
+  return new CatalogIndex(rows, () => true);
 }
 
+function track(model: ModelInfo, registry: CatalogIndex) {
+  const tracker = new CostTracker(model, registry, createLogger());
+  const increments: CostTrackerEvents["costIncremented"][0][] = [];
+  let final: CostTrackerEvents["finalCostSet"][0] | undefined;
+  tracker.on("costIncremented", (delta) => increments.push(delta));
+  tracker.on("finalCostSet", (event) => {
+    final = event;
+  });
+  return { tracker, increments, final: () => final };
+}
+
+const MILLION = { input_tokens: 1_000_000, output_tokens: 1_000_000 };
+
 describe("CostTracker", () => {
-  test("uses provider-qualified lookup for regular provider models", () => {
-    const { registry, calls } = createRegistry({
-      "deepseek/deepseek-v4-pro": 0.123,
-      "deepseek-v4-pro": 9.999,
-    });
-    const tracker = new CostTracker(createModel(), registry, createLogger());
-    let final: CostTrackerEvents["finalCostSet"][0] | undefined;
-    tracker.on("finalCostSet", (event) => {
-      final = event;
-    });
+  test("prices by the provider-qualified key, never a same-id row from another provider", () => {
+    const registry = registryWith([
+      createModel(),
+      createModel({ providerId: "reseller", cost: { input: 100, output: 200 } }),
+    ]);
+    const { tracker, final } = track(createModel({ cost: undefined }), registry);
 
-    tracker.handleResultUsage({
-      usage: {
-        input_tokens: 1_000,
-        output_tokens: 200,
-        cache_read_input_tokens: 300,
-      },
-    });
+    tracker.handleResultUsage({ usage: { ...MILLION, cache_read_input_tokens: 0 } });
 
-    expect(calls).toHaveLength(1);
-    expect(calls[0].modelName).toBe("deepseek/deepseek-v4-pro");
-    expect(calls[0].usage).toEqual({
-      inputTokens: 1_000,
-      outputTokens: 200,
-      cacheReadTokens: 300,
-      cacheCreationTokens: 0,
-    });
-    expect(final?.cost).toBe(0.123);
-    expect(final?.modelId).toBe("deepseek-v4-pro");
+    expect(final()?.cost).toBe(3);
+    expect(final()?.modelId).toBe("deepseek-v4-pro");
   });
 
-  test("uses provider-qualified lookup for non-passthrough model IDs containing slashes", () => {
-    const { registry, calls } = createRegistry({
-      "gateway/vendor/model": 0.456,
-      "vendor/model": 9.999,
-    });
-    const tracker = new CostTracker(
+  test("looks the pricing record up exactly, never by a differently cased id", () => {
+    const registry = registryWith([createModel({ modelId: "DeepSeek-V4-Pro" })]);
+    const { tracker, final } = track(createModel({ cost: undefined }), registry);
+
+    tracker.handleResultUsage({ total_cost_usd: 0.5, usage: MILLION });
+
+    expect(final()?.cost).toBe(0.5);
+  });
+
+  test("prices model ids containing slashes under their own provider", () => {
+    const registry = registryWith([
       createModel({
         providerId: "gateway",
         modelId: "vendor/model",
-        name: "Gateway Vendor Model",
+        cost: { input: 1, output: 1 },
       }),
+      createModel({ providerId: "vendor", modelId: "model", cost: { input: 100, output: 100 } }),
+    ]);
+    const { tracker, final } = track(
+      createModel({ providerId: "gateway", modelId: "vendor/model", cost: undefined }),
       registry,
-      createLogger(),
     );
-    let final: CostTrackerEvents["finalCostSet"][0] | undefined;
-    tracker.on("finalCostSet", (event) => {
-      final = event;
-    });
 
-    tracker.handleResultUsage({
-      usage: {
-        input_tokens: 1,
-        output_tokens: 1,
-      },
-    });
+    tracker.handleResultUsage({ usage: MILLION });
 
-    expect(calls).toHaveLength(1);
-    expect(calls[0].modelName).toBe("gateway/vendor/model");
-    expect(final?.cost).toBe(0.456);
-    expect(final?.modelId).toBe("vendor/model");
+    expect(final()?.cost).toBe(2);
+    expect(final()?.modelId).toBe("vendor/model");
   });
 
-  test("prices pi-harness models by the same provider-qualified key", () => {
-    // A model forced onto the pi harness carries its real identity; pricing
-    // uses the identical "<provider>/<model>" key as agent-sdk models.
-    const { registry, calls } = createRegistry({
-      "anthropic/claude-haiku-4-5": 0.789,
-      "pi/anthropic/claude-haiku-4-5": 9.999,
-    });
-    const tracker = new CostTracker(
+  test("prices pi-forced models by their real provider key", () => {
+    const registry = registryWith([
       createModel({
         providerId: "anthropic",
         modelId: "claude-haiku-4-5",
-        name: "Claude Haiku 4.5",
+        cost: { input: 1, output: 5 },
+      }),
+    ]);
+    const { tracker, final } = track(
+      createModel({
+        providerId: "anthropic",
+        modelId: "claude-haiku-4-5",
         harnessOverride: "pi",
+        cost: undefined,
       }),
       registry,
-      createLogger(),
     );
-    let final: CostTrackerEvents["finalCostSet"][0] | undefined;
-    tracker.on("finalCostSet", (event) => {
-      final = event;
-    });
 
-    tracker.handleResultUsage({
-      usage: {
-        input_tokens: 1,
-        output_tokens: 1,
-      },
-    });
+    tracker.handleResultUsage({ usage: MILLION });
 
-    expect(calls).toHaveLength(1);
-    expect(calls[0].modelName).toBe("anthropic/claude-haiku-4-5");
-    expect(final?.cost).toBe(0.789);
-    expect(final?.modelId).toBe("claude-haiku-4-5");
+    expect(final()?.cost).toBe(6);
   });
 
   test("prices openai-codex (ChatGPT-login) models as openai, incrementally too", () => {
-    // The registry has no `openai-codex` provider. Before the alias, every
-    // incremental token.usage for a codex codon read $0 and only the final
-    // result carried pi's total — so budgets could not enforce mid-codon.
-    const { registry, calls } = createRegistry({
-      "openai/gpt-5.6-luna": 0.00046,
-      "openai-codex/gpt-5.6-luna": null,
-    });
-    const tracker = new CostTracker(
-      createModel({ providerId: "openai-codex", modelId: "gpt-5.6-luna", name: "GPT 5.6 Luna" }),
+    // The catalog has no `openai-codex` provider. Before the pricing alias,
+    // every incremental token.usage for a codex codon read $0 and only the
+    // final result carried pi's total — so budgets could not enforce mid-codon.
+    const registry = registryWith([
+      createModel({
+        providerId: "openai",
+        modelId: "gpt-5.6-luna",
+        cost: { input: 0.2, output: 1.2 },
+      }),
+    ]);
+    const { tracker, increments, final } = track(
+      createModel({ providerId: "openai-codex", modelId: "gpt-5.6-luna", cost: undefined }),
       registry,
-      createLogger(),
     );
-    const increments: CostTrackerEvents["costIncremented"][0][] = [];
-    tracker.on("costIncremented", (delta) => {
-      increments.push(delta);
-    });
-    let final: CostTrackerEvents["finalCostSet"][0] | undefined;
-    tracker.on("finalCostSet", (event) => {
-      final = event;
-    });
 
     tracker.handleAssistantUsage({ input_tokens: 2_000, output_tokens: 50 });
     tracker.handleResultUsage({ usage: { input_tokens: 2_000, output_tokens: 50 } });
 
-    expect(calls.map((c) => c.modelName)).toEqual(["openai/gpt-5.6-luna", "openai/gpt-5.6-luna"]);
     expect(increments).toHaveLength(1);
-    expect(increments[0].cost).toBe(0.00046);
-    expect(final?.cost).toBe(0.00046);
+    expect(increments[0].cost).toBeCloseTo(0.00046, 10);
+    expect(final()?.cost).toBeCloseTo(0.00046, 10);
     // The executable identity is untouched: events still name the model pi ran.
-    expect(final?.modelId).toBe("gpt-5.6-luna");
+    expect(final()?.modelId).toBe("gpt-5.6-luna");
   });
 
-  test("prices routing-derived pi models by their real provider key", () => {
-    const { registry, calls } = createRegistry({
-      "openai/gpt-4o": 0.321,
-      "gpt-4o": 9.999,
-    });
-    const tracker = new CostTracker(
-      createModel({
-        providerId: "openai",
-        modelId: "gpt-4o",
-        name: "GPT-4o",
-      }),
-      registry,
-      createLogger(),
-    );
-    let delta: CostTrackerEvents["costIncremented"][0] | undefined;
-    tracker.on("costIncremented", (event) => {
-      delta = event;
-    });
-
-    tracker.handleAssistantUsage({
-      input_tokens: 1,
-      output_tokens: 1,
-    });
-
-    expect(calls).toHaveLength(1);
-    expect(calls[0].modelName).toBe("openai/gpt-4o");
-    expect(delta?.cost).toBe(0.321);
-  });
-
-  test("does not re-resolve pricing when the result message provides total cost", () => {
-    const { registry, calls } = createRegistry({
-      "deepseek/deepseek-v4-pro": 9.999,
-    });
-    const tracker = new CostTracker(createModel(), registry, createLogger());
-    let final: CostTrackerEvents["finalCostSet"][0] | undefined;
-    tracker.on("finalCostSet", (event) => {
-      final = event;
-    });
+  test("keeps the harness-reported total when every entry was priced by the harness", () => {
+    const registry = registryWith([createModel({ cost: { input: 100, output: 100 } })]);
+    const { tracker, final } = track(createModel(), registry);
 
     tracker.handleResultUsage({
       total_cost_usd: 0.111,
-      usage: {
-        input_tokens: 1,
-        output_tokens: 1,
+      usage: { input_tokens: 1, output_tokens: 1 },
+      modelUsage: {
+        "deepseek-v4-pro": {
+          inputTokens: 1,
+          outputTokens: 1,
+          costUSD: 0.111,
+          costBasis: "list",
+        },
       },
     });
 
-    expect(calls).toHaveLength(0);
-    expect(final?.cost).toBe(0.111);
-    expect(final?.modelId).toBe("deepseek-v4-pro");
+    expect(final()?.cost).toBe(0.111);
+  });
+
+  test("prices from the plan's persisted record when it carries catalog provenance", () => {
+    // A resumed run prices exactly as it was validated, even after the live
+    // catalog's price changed.
+    const registry = registryWith([createModel({ cost: { input: 100, output: 100 } })]);
+    const persisted = createModel({
+      cost: { input: 1, output: 2 },
+      provenance: {
+        confidence: "registry",
+        source: "models.dev snapshot 2026-09-25",
+        priceStatus: "known",
+      },
+    });
+    const { tracker, final } = track(persisted, registry);
+
+    tracker.handleResultUsage({ usage: MILLION });
+
+    expect(final()?.cost).toBe(3);
+  });
+
+  test("re-prices entries Claude Code billed at a guessed rate (costBasis unknown)", () => {
+    const sonnet6 = createModel({
+      providerId: "anthropic",
+      modelId: "claude-sonnet-6",
+      cost: { input: 2, output: 10 },
+      provenance: {
+        confidence: "provisional",
+        source: "anthropic GET /v1/models",
+        priceStatus: "known",
+      },
+    });
+    const { tracker, final } = track(sonnet6, registryWith([]));
+
+    tracker.handleResultUsage({
+      total_cost_usd: 24.001,
+      usage: MILLION,
+      modelUsage: {
+        // Claude Code priced its unknown model at the default model's $4/$20.
+        "claude-sonnet-6": {
+          inputTokens: 1_000_000,
+          outputTokens: 1_000_000,
+          costUSD: 24,
+          costBasis: "unknown",
+        },
+        "claude-haiku-4-5": {
+          inputTokens: 1_000,
+          outputTokens: 0,
+          costUSD: 0.001,
+          costBasis: "list",
+        },
+      },
+    });
+
+    expect(final()?.cost).toBeCloseTo(12.001, 10);
+    const usage = final()?.modelUsage as Record<string, { costUSD: number }>;
+    expect(usage["claude-sonnet-6"].costUSD).toBe(12);
+    expect(usage["claude-haiku-4-5"].costUSD).toBe(0.001);
+  });
+
+  test("counts an unknown price at the catalog's ceiling estimate instead of $0", () => {
+    const unpriced = createModel({
+      modelId: "deepseek-v5-preview",
+      cost: undefined,
+      provenance: {
+        confidence: "provisional",
+        source: "deepseek GET /models",
+        priceStatus: "unknown",
+        budgetCost: { input: 3, output: 6 },
+        budgetCostBasis: "ceiling estimate",
+      },
+    });
+    const { tracker, increments, final } = track(unpriced, registryWith([]));
+
+    tracker.handleAssistantUsage({ input_tokens: 1_000_000, output_tokens: 0 });
+    tracker.handleResultUsage({ usage: MILLION });
+
+    expect(increments[0].cost).toBe(3);
+    expect(final()?.cost).toBe(9);
+  });
+
+  const declared = (cost: ModelInfo["cost"]) =>
+    createModel({
+      providerId: "anthropic",
+      modelId: "claude-haiku-4-5",
+      cost,
+      provenance: {
+        confidence: "user",
+        source: "hank.json models block",
+        priceStatus: "known",
+        priceSource: "hank.json models block",
+        priceDeclared: true,
+      },
+    });
+
+  test("records the codon's model at its declared price even when Claude Code priced it", () => {
+    const { tracker, final } = track(declared({ input: 1000, output: 1000 }), registryWith([]));
+
+    tracker.handleResultUsage({
+      total_cost_usd: 2.001,
+      usage: MILLION,
+      modelUsage: {
+        // Claude Code priced the model it knows at its own list price.
+        "claude-haiku-4-5": {
+          inputTokens: 1_000_000,
+          outputTokens: 1_000_000,
+          costUSD: 2,
+          costBasis: "list",
+        },
+        // Another model Claude Code called keeps the CLI's price.
+        "claude-opus-5-5": { inputTokens: 1_000, outputTokens: 0, costUSD: 0.001 },
+      },
+    });
+
+    expect(final()?.cost).toBeCloseTo(2000.001, 10);
+    const usage = final()?.modelUsage as Record<string, { costUSD: number }>;
+    expect(usage["claude-haiku-4-5"].costUSD).toBe(2000);
+    expect(usage["claude-opus-5-5"].costUSD).toBe(0.001);
+  });
+
+  test("records a declared price over pi's total, which carries no per-model usage", () => {
+    const { tracker, final } = track(declared({ input: 1000, output: 1000 }), registryWith([]));
+
+    tracker.handleResultUsage({ total_cost_usd: 2, usage: MILLION });
+
+    expect(final()?.cost).toBe(2000);
+  });
+
+  test("a disputed price still records the harness total", () => {
+    const disputed = createModel({
+      cost: { input: 1, output: 2 },
+      provenance: {
+        confidence: "registry",
+        source: "models.dev snapshot",
+        priceStatus: "disputed",
+        budgetCost: { input: 2, output: 4 },
+      },
+    });
+    const { tracker, final } = track(disputed, registryWith([]));
+
+    tracker.handleResultUsage({ total_cost_usd: 3, usage: MILLION });
+
+    expect(final()?.cost).toBe(3);
   });
 });

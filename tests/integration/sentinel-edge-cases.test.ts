@@ -21,7 +21,7 @@ function createSentinelConfig(partial: Partial<SentinelConfig>): SentinelConfig 
   const base: SentinelConfig = {
     id: "test-sentinel",
     name: "Test Sentinel",
-    model: "sonnet",
+    model: "anthropic/claude-sonnet-4-6",
     trigger: {
       type: "event",
       on: ["info"],

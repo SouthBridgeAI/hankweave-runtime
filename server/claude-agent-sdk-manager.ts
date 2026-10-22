@@ -1,4 +1,4 @@
-import { execSync } from "node:child_process";
+import { execFileSync, execSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -28,6 +28,7 @@ import { TIMEOUTS } from "./config.js";
 import { ExecutionLayout } from "./execution-layout.js";
 import { HANKWEAVE_ENV_UNSET, hankweaveEnvEntries } from "./hankweave-env.js";
 import { PromptBuilder } from "./prompt-builder.js";
+import { RuntimeLock } from "./runtime-lock.js";
 import type { Codon, ShimSelfTestResult } from "./types/types.js";
 import type { Logger } from "./utils.js";
 import { IdleTimeoutError, isCompiledExecutable, toError, withIdleTimeout } from "./utils.js";
@@ -332,10 +333,157 @@ export class FileSessionStore implements SessionStore {
   }
 }
 
+type HarnessStep = ShimSelfTestResult["checks"][number];
+
+/** The installed SDK's version: the SDK is statically imported, so reaching here proves it loads. */
+function claudeSdkVersion(): string {
+  try {
+    // The SDK's entry point (`sdk.mjs`) sits at the package root, so its
+    // package.json is a sibling — no upward traversal.
+    const sdkPackageJsonPath = path.join(
+      path.dirname(require.resolve("@anthropic-ai/claude-agent-sdk")),
+      "package.json",
+    );
+    return JSON.parse(fs.readFileSync(sdkPackageJsonPath, "utf-8")).version || "unknown";
+  } catch {
+    // If we can't read the version, that's ok
+    return "installed";
+  }
+}
+
+/** Check 2: the Claude CLI the SDK spawns — an explicit path must exist; otherwise detected or left to the SDK. */
+function claudeCliStep(env: NodeJS.ProcessEnv): HarnessStep {
+  const customCliPath = env.CLAUDE_PATH_TO_CLAUDE_EXECUTABLE;
+  if (customCliPath) {
+    const cliExists = fs.existsSync(customCliPath);
+    return {
+      name: "claude_cli_executable",
+      passed: cliExists,
+      message: cliExists
+        ? `Claude CLI found at: ${customCliPath}`
+        : `Claude CLI not found at specified path: ${customCliPath}`,
+    };
+  }
+  const detectedPath = detectClaudeExecutable();
+  return {
+    name: "claude_cli_executable",
+    passed: true,
+    message: detectedPath
+      ? `Claude CLI detected at: ${detectedPath}`
+      : "Claude CLI not detected, SDK will use internal CLI resolution",
+  };
+}
+
+/**
+ * Where the Bedrock child will get AWS credentials, or null. Agent-managed
+ * authentication modes first: with CLAUDE_CODE_SKIP_BEDROCK_AUTH the operator
+ * points the CLI at a gateway (ANTHROPIC_BEDROCK_BASE_URL) that holds the
+ * credentials, and with awsAuthRefresh/awsCredentialExport in Claude settings
+ * the CLI fetches its own — in both, no ambient credential source exists by
+ * design, and both variables/settings reach the child, so preflight must not
+ * block what the child can authenticate. Then static ambient sources; finally
+ * probe the instance metadata service so EC2/ECS instance roles — invisible to
+ * any env/file check — still pass.
+ *
+ * AWS credentials are ambient-only on this route (a codon's env block never
+ * reaches the child's AWS chain — see buildSDKOptions), so the process
+ * environment is what is checked. The IMDS probe is link-local and runs even
+ * with online model checks off: it finds credentials, it does not look a
+ * model up.
+ */
+async function bedrockCredentialSource(): Promise<string | null> {
+  const skipAuth = process.env.CLAUDE_CODE_SKIP_BEDROCK_AUTH;
+  if (skipAuth && skipAuth !== "0" && skipAuth.toLowerCase() !== "false") {
+    return "CLAUDE_CODE_SKIP_BEDROCK_AUTH (gateway-managed auth)";
+  }
+  const ambient = describeAmbientAwsCredentialSource();
+  if (ambient !== null) return ambient;
+  if (claudeSettingsDefineAwsCredentialHelpers()) {
+    return "awsAuthRefresh/awsCredentialExport (Claude settings)";
+  }
+  return (await detectInstanceMetadataCredentials()) ? "instance metadata service (IMDS)" : null;
+}
+
+/** The region the Bedrock child will use, as the message states it. */
+function bedrockRegionText(): string {
+  const explicitRegion = process.env.AWS_REGION ?? process.env.AWS_DEFAULT_REGION;
+  if (explicitRegion) return explicitRegion;
+  if (process.env.AWS_PROFILE) return `from AWS_PROFILE "${process.env.AWS_PROFILE}"`;
+  if (defaultProfileDefinesRegion()) return "from the default AWS profile";
+  return `${BEDROCK_DEFAULT_REGION} (AWS_REGION not set — defaulting)`;
+}
+
+/**
+ * Check 3, Bedrock mode: the SDK authenticates via the AWS credential chain
+ * (CLAUDE_CODE_USE_BEDROCK) — some credential source must be visible;
+ * validity is proven at first invoke, whose errors carry mapped remediation
+ * messages.
+ */
+async function bedrockAuthStep(): Promise<HarnessStep> {
+  const source = await bedrockCredentialSource();
+  return {
+    name: "authentication",
+    passed: source !== null,
+    message: source
+      ? `Bedrock mode: AWS credentials via ${source}, region ${bedrockRegionText()}`
+      : "No AWS credentials found for Bedrock. Quickest: set AWS_BEARER_TOKEN_BEDROCK " +
+        "(AWS Console → Bedrock → API keys → long-term key). Enterprise: set AWS_PROFILE " +
+        "after `aws sso login`, or AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY. Also set AWS_REGION.",
+  };
+}
+
+/**
+ * Check 3, Anthropic: the Agent SDK authenticates via ANTHROPIC_API_KEY.
+ * With HW_INTERNAL_CLAUDE_LEGACY_AUTH set, lenient mode: trust the SDK to
+ * resolve credentials itself (e.g. a local `claude login` in the keychain).
+ */
+function anthropicAuthStep(env: NodeJS.ProcessEnv): HarnessStep {
+  if (env.ANTHROPIC_API_KEY) {
+    return {
+      name: "authentication",
+      passed: true,
+      message: "Authentication configured via ANTHROPIC_API_KEY",
+    };
+  }
+  const legacyAuth = isLegacyClaudeAuthEnabled();
+  return {
+    name: "authentication",
+    passed: legacyAuth,
+    message: legacyAuth
+      ? "ANTHROPIC_API_KEY not set; HW_INTERNAL_CLAUDE_LEGACY_AUTH enabled — trusting local Claude Code login"
+      : "No authentication found (set ANTHROPIC_API_KEY)",
+  };
+}
+
+/**
+ * The Claude Agent SDK's prerequisite checks — SDK present, CLI found,
+ * credentials visible — for the self-test and for model validation (spec 72:
+ * ClaudeModelCheck runs these before it answers for a model). `env` is the
+ * environment the codon would run with.
+ */
+export async function claudeHarnessSteps(options: {
+  bedrock: boolean;
+  env: NodeJS.ProcessEnv;
+}): Promise<{ steps: ShimSelfTestResult["checks"]; sdkVersion: string }> {
+  const sdkVersion = claudeSdkVersion();
+  const steps: ShimSelfTestResult["checks"] = [
+    {
+      name: "sdk_installed",
+      passed: true,
+      message: `Claude Agent SDK found (version ${sdkVersion})`,
+    },
+    claudeCliStep(options.env),
+    options.bedrock ? await bedrockAuthStep() : anthropicAuthStep(options.env),
+  ];
+  return { steps, sdkVersion };
+}
+
 export class ClaudeAgentSDKManager extends BaseProcessManager {
   private abortController: AbortController | undefined;
   private logStream: fs.WriteStream | undefined;
   private killed = false;
+  /** Whether this session already logged Claude Code's unrecognized-model signal. */
+  private unknownModelNoted = false;
   private sessionId: string | undefined;
   private syntheticPid: number | undefined;
   private queryPromise: Promise<void> | undefined;
@@ -528,6 +676,26 @@ export class ClaudeAgentSDKManager extends BaseProcessManager {
   /**
    * Build SDK options from codon configuration.
    */
+  /**
+   * Claude Code tags stderr "[claude-code:unrecognized_model]" when the id is
+   * newer than its built-in model table (a model hankweave's catalog learned
+   * after this SDK was pinned). It still sends the id, but applies its
+   * unknown-model defaults and prices it at its default model's rate;
+   * CostTracker re-prices the codon from the model catalog (costBasis
+   * "unknown"). Measured on CLI 2.1.282 — see intermediates/70 Spike 2.
+   * Read from our spawner: the SDK's `stderr` option only runs with its own.
+   */
+  private noteUnrecognizedModel(data: string, modelId: string): void {
+    if (this.unknownModelNoted || !data.includes("[claude-code:unrecognized_model]")) return;
+    this.unknownModelNoted = true;
+    this.logger.log(
+      `Claude Code does not recognize model '${modelId}': it caps output at its ` +
+        "unknown-model default (32k tokens per request), assumes a 200k context window, " +
+        "and guesses the price; hankweave re-prices the codon from the model catalog",
+      "info",
+    );
+  }
+
   private buildSDKOptions(codon: Codon, previousSessionId: string | null): Options {
     // Model override is already applied in loadCodonSequence(), so just use codon.model
     const modelInfo = codon.model;
@@ -537,6 +705,48 @@ export class ClaudeAgentSDKManager extends BaseProcessManager {
       cwd: this.agentRootPath, // Agents work in agentRootPath (not executionPath)
       permissionMode: "bypassPermissions",
       abortController: this.abortController,
+      // Retain the real child for synchronous lease-loss fencing. Its tool
+      // subprocesses must stop too; the SDK's parent-exit handler only sends SIGTERM.
+      spawnClaudeCodeProcess: ({ command, args, cwd, env, signal }) => {
+        const child = spawn(command, args, {
+          cwd,
+          env,
+          signal,
+          stdio: ["pipe", "pipe", "pipe"],
+          // On POSIX, give the CLI and its tools a process group we can kill together.
+          detached: process.platform !== "win32",
+          windowsHide: true,
+        });
+        if (child.pid !== undefined) {
+          const unregister = RuntimeLock.registerShutdownHook(() => {
+            if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null)
+              return;
+            // Avoid ChildProcess.kill(): synchronous error handlers may write state.
+            if (process.platform === "win32") {
+              // The fatal lease-loss path exits immediately after these hooks.
+              execFileSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
+                stdio: "ignore",
+                windowsHide: true,
+              });
+            } else {
+              process.kill(-child.pid, "SIGKILL");
+            }
+          });
+          // Keep the hook until actual exit, even during asynchronous teardown.
+          // child.killed only means a signal was sent, not that the child exited.
+          child.once("exit", unregister);
+        }
+        // With a custom spawner the SDK no longer consumes stderr itself.
+        child.stderr.setEncoding("utf8");
+        child.stderr.on("data", (data: string) => {
+          this.logger.log(`Claude SDK stderr: ${data}`, "debug");
+          this.noteUnrecognizedModel(data, modelInfo.modelId);
+        });
+        child.stderr.on("error", (error) =>
+          this.logger.log(`Claude SDK stderr read failed: ${error.message}`, "debug"),
+        );
+        return child;
+      },
       settingSources: ["user"],
       // Flag-settings layer (highest user-controlled priority): pin compaction
       // regardless of the user's ~/.claude/settings.json. Default OFF — the
@@ -1099,140 +1309,10 @@ export class ClaudeAgentSDKManager extends BaseProcessManager {
   async runSelfTest(): Promise<ShimSelfTestResult> {
     this.logger.log("Running Claude Agent SDK self-test...");
 
-    const checks: ShimSelfTestResult["checks"] = [];
-
-    // Check 1: Verify SDK is installed (by trying to import it)
-    let sdkFound = false;
-    let sdkVersion = "unknown";
-    try {
-      // SDK is already imported, so if we got this far, it's available
-      sdkFound = true;
-      // Try to get version from package.json
-      try {
-        // The SDK's entry point (`sdk.mjs`) sits at the package root, so its
-        // package.json is a sibling — no upward traversal.
-        const sdkPackageJsonPath = path.join(
-          path.dirname(require.resolve("@anthropic-ai/claude-agent-sdk")),
-          "package.json",
-        );
-        const sdkPackageJson = JSON.parse(fs.readFileSync(sdkPackageJsonPath, "utf-8"));
-        sdkVersion = sdkPackageJson.version || "unknown";
-      } catch {
-        // If we can't read the version, that's ok
-        sdkVersion = "installed";
-      }
-
-      checks.push({
-        name: "sdk_installed",
-        passed: true,
-        message: `Claude Agent SDK found (version ${sdkVersion})`,
-      });
-    } catch (error) {
-      checks.push({
-        name: "sdk_installed",
-        passed: false,
-        message:
-          "Claude Agent SDK not found or failed to load: " +
-          (error instanceof Error ? error.message : "Unknown error"),
-      });
-    }
-
-    // Check 2: Verify Claude CLI executable is available
-    const customCliPath = process.env.CLAUDE_PATH_TO_CLAUDE_EXECUTABLE;
-    if (customCliPath) {
-      // User explicitly set a path - verify it exists
-      const cliExists = fs.existsSync(customCliPath);
-      checks.push({
-        name: "claude_cli_executable",
-        passed: cliExists,
-        message: cliExists
-          ? `Claude CLI found at: ${customCliPath}`
-          : `Claude CLI not found at specified path: ${customCliPath}`,
-      });
-    } else {
-      // Try to detect Claude CLI in standard locations
-      const detectedPath = detectClaudeExecutable();
-      if (detectedPath) {
-        checks.push({
-          name: "claude_cli_executable",
-          passed: true,
-          message: `Claude CLI detected at: ${detectedPath}`,
-        });
-      } else {
-        // No CLI found, but SDK will handle it internally
-        checks.push({
-          name: "claude_cli_executable",
-          passed: true,
-          message: "Claude CLI not detected, SDK will use internal CLI resolution",
-        });
-      }
-    }
-
-    // Check 3: Verify authentication. In Bedrock mode the SDK authenticates
-    // via the AWS credential chain (CLAUDE_CODE_USE_BEDROCK) — check that some
-    // credential source is visible; validity is proven at first invoke, whose
-    // errors carry mapped remediation messages. Otherwise the Agent SDK
-    // authenticates via ANTHROPIC_API_KEY (OAuth tokens are no longer
-    // supported). When HW_INTERNAL_CLAUDE_LEGACY_AUTH is set, run in lenient
-    // mode: don't hard-require ANTHROPIC_API_KEY and instead trust the SDK to
-    // resolve credentials itself (e.g. a local `claude login` in the keychain).
-    if (this.bedrockMode) {
-      // Agent-managed authentication modes first: with
-      // CLAUDE_CODE_SKIP_BEDROCK_AUTH the operator points the CLI at a
-      // gateway (ANTHROPIC_BEDROCK_BASE_URL) that holds the credentials, and
-      // with awsAuthRefresh/awsCredentialExport in Claude settings the CLI
-      // fetches its own — in both, no ambient credential source exists by
-      // design, and both variables/settings reach the child, so preflight
-      // must not block what the child can authenticate. Then static ambient
-      // sources; finally probe the instance metadata service so EC2/ECS
-      // instance roles — invisible to any env/file check — still pass.
-      let source: string | null = null;
-      const skipAuth = process.env.CLAUDE_CODE_SKIP_BEDROCK_AUTH;
-      if (skipAuth && skipAuth !== "0" && skipAuth.toLowerCase() !== "false") {
-        source = "CLAUDE_CODE_SKIP_BEDROCK_AUTH (gateway-managed auth)";
-      }
-      if (source === null) source = describeAmbientAwsCredentialSource();
-      if (source === null && claudeSettingsDefineAwsCredentialHelpers()) {
-        source = "awsAuthRefresh/awsCredentialExport (Claude settings)";
-      }
-      if (source === null && (await detectInstanceMetadataCredentials())) {
-        source = "instance metadata service (IMDS)";
-      }
-      const explicitRegion = process.env.AWS_REGION ?? process.env.AWS_DEFAULT_REGION;
-      const regionFromProfile =
-        !explicitRegion && (!!process.env.AWS_PROFILE || defaultProfileDefinesRegion());
-      const region =
-        explicitRegion ??
-        (process.env.AWS_PROFILE
-          ? `from AWS_PROFILE "${process.env.AWS_PROFILE}"`
-          : regionFromProfile
-            ? "from the default AWS profile"
-            : BEDROCK_DEFAULT_REGION);
-      checks.push({
-        name: "authentication",
-        passed: source !== null,
-        message: source
-          ? `Bedrock mode: AWS credentials via ${source}, region ${region}${
-              explicitRegion || regionFromProfile ? "" : " (AWS_REGION not set — defaulting)"
-            }`
-          : "No AWS credentials found for Bedrock. Quickest: set AWS_BEARER_TOKEN_BEDROCK " +
-            "(AWS Console → Bedrock → API keys → long-term key). Enterprise: set AWS_PROFILE " +
-            "after `aws sso login`, or AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY. Also set AWS_REGION.",
-      });
-    } else {
-      const hasApiKey = !!process.env.ANTHROPIC_API_KEY;
-      const legacyAuth = isLegacyClaudeAuthEnabled();
-
-      checks.push({
-        name: "authentication",
-        passed: hasApiKey || legacyAuth,
-        message: hasApiKey
-          ? "Authentication configured via ANTHROPIC_API_KEY"
-          : legacyAuth
-            ? "ANTHROPIC_API_KEY not set; HW_INTERNAL_CLAUDE_LEGACY_AUTH enabled — trusting local Claude Code login"
-            : "No authentication found (set ANTHROPIC_API_KEY)",
-      });
-    }
+    const { steps: checks, sdkVersion } = await claudeHarnessSteps({
+      bedrock: this.bedrockMode,
+      env: process.env,
+    });
 
     // Check 4: Verify custom base URL if set
     if (this.anthropicBaseUrl) {
@@ -1254,7 +1334,7 @@ export class ClaudeAgentSDKManager extends BaseProcessManager {
       agent: {
         name: "claude-agent-sdk",
         version: sdkVersion,
-        found: sdkFound,
+        found: true,
       },
       checks,
       overall: {

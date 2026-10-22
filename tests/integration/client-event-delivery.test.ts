@@ -25,6 +25,8 @@
  *   its replay tmpdir before anything can connect.
  */
 import { describe, expect, test } from "bun:test";
+import fs from "node:fs";
+import path from "node:path";
 import type { ServerEvent } from "../../server/schemas/event-schemas.js";
 import type { HandshakeResponse } from "../../server/types/types.js";
 import {
@@ -169,27 +171,33 @@ describe("client event delivery", () => {
   }, 150_000);
 
   test("launchHankweave backfills pre-connection events only when asked", async () => {
-    // Pins the default and the escape hatch in one place.
-    //
-    // Asserting "the client saw every codon.started" would be the obvious shape,
-    // but it is a coin flip — measured 3 failures in 5 — because it turns on
-    // whether codon 1 reaches `running` before the handshake lands. A guard that
-    // fires 60% of the time is the very thing this suite exists to stop shipping.
-    //
-    // `RunStarted` is deterministic instead: `startNewRun()` runs inside
-    // `HankweaveRuntime.start()` *before* `serve()` binds the socket, so no
-    // client can ever observe it live. Seeing it at all proves backfill ran.
-    const sawRunStarted = (server: LaunchedServer): boolean =>
-      server
-        .getEvents()
-        .some((e) => e.type === "state.transition" && e.data.transitionType === "RunStarted");
+    // Seed the journal before startup so this event can only arrive as history.
+    // RunStarted is queued during startup but can still be emitted after the
+    // socket binds, making it an unreliable signal of backfill on slow runners.
+    const historicalEvent: ServerEvent = {
+      id: "pre-startup-history-marker",
+      timestamp: "2026-01-01T00:00:00.000Z",
+      type: "info",
+      data: { message: "Recorded before this runtime started" },
+    };
+    const seedHistory = (fixture: BuiltReplayFixture) => {
+      const eventsDir = path.join(fixture.execDir, ".hankweave", "events");
+      fs.mkdirSync(eventsDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(eventsDir, "events.jsonl"),
+        `${JSON.stringify(historicalEvent)}\n`,
+      );
+    };
+    const sawHistory = (server: LaunchedServer): boolean =>
+      server.getEvents().some((event) => event.id === historicalEvent.id);
 
     const optedIn = replayFixture();
+    seedHistory(optedIn);
     let withHistory: LaunchedServer | undefined;
     try {
       withHistory = await launchHeadless(optedIn, true);
       await waitForEarlyCodons(withHistory);
-      expect(sawRunStarted(withHistory)).toBe(true);
+      expect(sawHistory(withHistory)).toBe(true);
     } finally {
       await withHistory?.kill().catch(() => {});
       optedIn.cleanup();
@@ -199,11 +207,12 @@ describe("client event delivery", () => {
     // directory whole, journal included, so backfill against a checked-in
     // fixture would replay the original recording's events into a live run.
     const byDefault = replayFixture();
+    seedHistory(byDefault);
     let noHistory: LaunchedServer | undefined;
     try {
       noHistory = await launchHeadless(byDefault);
       await waitForEarlyCodons(noHistory);
-      expect(sawRunStarted(noHistory)).toBe(false);
+      expect(sawHistory(noHistory)).toBe(false);
     } finally {
       await noHistory?.kill().catch(() => {});
       byDefault.cleanup();

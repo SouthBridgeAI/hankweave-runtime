@@ -18,6 +18,7 @@ import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import { RuntimeLock } from "../../server/runtime-lock.js";
 import { launchHankweave } from "../utils/hankweave-server-test-helpers.js";
 import {
   generateTestTimestamp,
@@ -79,7 +80,7 @@ describe("journal diet + restore CLI", () => {
 
     // Step 1: scaffold the execution directory with a clean boot (no codons).
     // dietOnFinalize is on by default and even this idle boot's run goes
-    // terminal (RunFailed) at SIGINT — disable it so shutdown leaves the raw
+    // terminal (RunFailed) at shutdown — disable it so shutdown leaves the raw
     // events.jsonl for the OFFLINE diet CLI this test exists to exercise.
     const port = await getFreePort();
     const firstServer = await launchHankweave({
@@ -101,30 +102,19 @@ describe("journal diet + restore CLI", () => {
     const originalJournal = fs.readFileSync(journalPath);
     const originalSha = sha256(originalJournal);
 
-    // Step 2a: the diet CLI must refuse while a live pid holds runtime.lock —
-    // in the current JSON format AND the legacy bare-pid format (Codex round
-    // 2: the legacy format previously slipped through and could lose events
-    // appended after the unlink). This test's own pid is conveniently alive.
-    const lockPath = path.join(execDir, ".hankweave", "runtime.lock");
-    for (const liveLock of [
-      JSON.stringify({ pid: process.pid, lastHeartbeat: new Date().toISOString() }),
-      String(process.pid),
-    ]) {
-      fs.writeFileSync(lockPath, liveLock);
-      const refused = await runCli(["--diet-journal", execDir]);
-      expect(refused.code).not.toBe(0);
-      expect(refused.stderr).toContain("not dieting");
-      expect(fs.existsSync(journalPath)).toBe(true);
+    // Step 2a: both offline commands must refuse while another command owns
+    // the execution's in-directory lease, leaving the journal byte-identical.
+    const lock = await RuntimeLock.acquire(execDir);
+    try {
+      for (const command of ["--diet-journal", "--restore-journal"]) {
+        const refused = await runCli([command, execDir]);
+        expect(refused.code).toBe(1);
+        expect(refused.stderr).toContain("is in use by another command");
+        expect(sha256(fs.readFileSync(journalPath))).toBe(originalSha);
+      }
+    } finally {
+      await lock.release();
     }
-    // An unparseable lock fails closed too — including one that merely
-    // STARTS with digits ("123-corrupt" is not a legacy bare-pid lock).
-    for (const garbage of ["@@@ not a lock @@@", "123-corrupt"]) {
-      fs.writeFileSync(lockPath, garbage);
-      const refusedGarbage = await runCli(["--diet-journal", execDir]);
-      expect(refusedGarbage.code).not.toBe(0);
-      expect(refusedGarbage.stderr).toContain("could not be parsed");
-    }
-    fs.unlinkSync(lockPath);
 
     // Step 2: diet via the CLI.
     const diet = await runCli(["--diet-journal", execDir]);

@@ -10,8 +10,6 @@
  * exit, so no real process.exit and no global timer spies are needed.
  */
 import { describe, expect, test } from "bun:test";
-import os from "node:os";
-import path from "node:path";
 import { HankweaveRuntime } from "../../server/hankweave-runtime";
 import { ShutdownWatchdog } from "../../server/shutdown-watchdog";
 
@@ -24,6 +22,7 @@ type Wired = {
   watchdog: ShutdownWatchdog;
   exits: number[];
   computeExitCode: (reason: string, exitCode?: number) => number;
+  waitForForcedShutdown: (task: Promise<void>, timeoutMs?: number) => Promise<void>;
   forceShutdown: (reason: string, exitProcess?: boolean) => Promise<void>;
 };
 
@@ -38,15 +37,15 @@ function makeRuntime(runStatus = "failed"): Wired {
     exit: (code) => rt.exits.push(code),
   });
   // Fields forceShutdown() / cleanupCurrentCodon() touch: no running codon, no
-  // open clients/servers, and a lock file path that does not exist.
+  // open clients/servers.
   rt.currentCodon = undefined;
   rt.codonRunners = new Map();
   rt.pendingToolUses = new Map();
   rt.clients = new Map();
   rt.server = null;
   rt.proxyRunner = null;
-  rt.config = { lockFile: path.join(os.tmpdir(), `nonexistent-lock-${Date.now()}`) };
-  rt.uploadTrace = undefined;
+  rt.config = {};
+  rt.prepareTraceUpload = undefined;
   return rt;
 }
 
@@ -100,8 +99,11 @@ describe("shutdown paths drive the watchdog", () => {
     (rt as unknown as { codonRunners: Map<string, unknown> }).codonRunners = new Map([
       ["analyze", { forceKill: () => new Promise<void>(() => {}) }],
     ]);
-    void rt.forceShutdown("running integration test", false);
-    await sleep(WINDOW_MS * 3);
+    const wait = rt.waitForForcedShutdown.bind(rt);
+    rt.waitForForcedShutdown = (task) => wait(task, WINDOW_MS);
+    await expect(rt.forceShutdown("running integration test", false)).rejects.toThrow(
+      "Force shutdown timed out",
+    );
     expect(rt.watchdog.armed).toBe(false);
     expect(rt.exits).toEqual([]);
   });

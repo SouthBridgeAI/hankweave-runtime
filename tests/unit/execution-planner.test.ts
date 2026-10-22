@@ -17,7 +17,7 @@ const createCodon = (id: string, name: string): Codon =>
   createTestCodon({
     id,
     name,
-    model: "sonnet",
+    model: "anthropic/claude-sonnet-4-6",
     continuationMode: "fresh",
     promptText: `Prompt for ${name}`,
   });
@@ -999,7 +999,7 @@ describe("checkpointPatternsThrough", () => {
         ...createTestCodon({
           id,
           name: id,
-          model: "haiku",
+          model: "anthropic/claude-haiku-4-5",
           continuationMode: "fresh",
           promptText: id,
         }),

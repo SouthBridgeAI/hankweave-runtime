@@ -424,7 +424,7 @@ describe("Sentinel Templating Integration", () => {
         {
           id: "manager-test-sentinel",
           name: "Manager Test Sentinel",
-          model: "sonnet",
+          model: "anthropic/claude-sonnet-4-6",
           trigger: {
             type: "event",
             on: ["assistant.action"],

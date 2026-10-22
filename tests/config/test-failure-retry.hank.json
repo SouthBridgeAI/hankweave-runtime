@@ -3,7 +3,7 @@
     {
       "id": "flaky-codon",
       "name": "May Fail Initially",
-      "model": "haiku",
+      "model": "anthropic/claude-haiku-4-5",
       "continuationMode": "fresh",
       "promptText": "Attempt to read a file that may not exist initially",
       "onFailure": "retry",

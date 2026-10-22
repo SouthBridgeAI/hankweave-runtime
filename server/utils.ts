@@ -30,11 +30,23 @@ export function generateId(): string {
 // -------------
 
 export class Logger {
+  private fileLogging = true;
+
+  /** Stop touching execution files once ownership has ended. */
+  disableFileLogging(): void {
+    this.fileLogging = false;
+  }
+
   constructor(private logFile: string) {}
 
   log(message: string, level: "info" | "error" | "debug" = "info"): void {
     const timestamp = new Date().toISOString();
     const logLine = `[${timestamp}] [${level.toUpperCase()}] ${message}\n`;
+    if (!this.fileLogging) {
+      if (level === "error") console.error(logLine.trim());
+      else console.log(logLine.trim());
+      return;
+    }
 
     try {
       const logsDir = path.dirname(this.logFile);
@@ -66,6 +78,7 @@ export class Logger {
     direction: "in" | "out",
     data: ClientCommand | ServerEvent,
   ): void {
+    if (!this.fileLogging) return;
     try {
       // Create the log entry with minimal wrapper
       const logEntry: WebSocketLogEntry = {
@@ -506,6 +519,29 @@ export function assertNever(x: never): never {
 }
 
 // -------------
+// Concurrency
+// -------------
+
+/**
+ * `Promise.all` that waits for every input to settle before it rejects.
+ * A plain `Promise.all` rejects on the first failure while its siblings
+ * are still running, so a caller that reacts to the rejection by tearing
+ * down shared state races the stragglers. The motivating case: parallel
+ * child processes whose cwd is a directory the caller then deletes —
+ * Windows refuses to remove a live process's cwd (EBUSY). Resolves to the
+ * values in order; rejects with the first failure in argument order once
+ * all have settled.
+ */
+export async function settledAll<T extends readonly unknown[]>(
+  promises: { [K in keyof T]: Promise<T[K]> },
+): Promise<T> {
+  const settled = await Promise.allSettled(promises);
+  const failed = settled.find((r) => r.status === "rejected");
+  if (failed) throw (failed as PromiseRejectedResult).reason;
+  return settled.map((r) => (r as PromiseFulfilledResult<unknown>).value) as unknown as T;
+}
+
+// -------------
 // Idle Timeout
 // -------------
 
@@ -801,6 +837,19 @@ export function compareUtf8(a: string, b: string): number {
 // -------------
 // File and Directory Utilities
 // -------------
+
+/** Resolve aliases even when the leaf (or several parents) does not exist yet. */
+export function canonicalFilePath(filePath: string): string {
+  const absolute = path.resolve(filePath);
+  try {
+    return fs.realpathSync(absolute);
+  } catch {
+    const parent = path.dirname(absolute);
+    return parent === absolute
+      ? absolute
+      : path.join(canonicalFilePath(parent), path.basename(absolute));
+  }
+}
 
 /** Convert the host platform's path separators to POSIX separators. */
 export function toPosix(p: string): string {
@@ -1182,74 +1231,6 @@ export function renameWithRetrySync(
 
   // Should never reach here, but TypeScript doesn't know that
   throw lastError || new Error("Rename failed after retries");
-}
-
-/**
- * Synchronous directory/file removal with retry logic for Windows file locking issues.
- *
- * On Windows, file handles can take time to release after process termination,
- * causing EBUSY/EPERM errors when trying to delete directories. This function
- * retries the operation with exponential backoff to handle these transient errors.
- *
- * @param targetPath - Path to file or directory to remove
- * @param options - Removal and retry configuration options
- * @param options.recursive - Allow recursive removal of directories (default: false)
- * @param options.force - Continue even if path doesn't exist (default: false)
- * @param options.maxRetries - Maximum number of retry attempts (default: 5)
- * @param options.initialDelay - Initial delay in milliseconds (default: 10ms)
- * @param options.logger - Optional logger for debugging retry attempts
- * @throws Error if removal fails after all retries or encounters non-retryable error
- *
- * @example
- * ```ts
- * rmSyncWithRetry(tempDir, { recursive: true, force: true, logger });
- * ```
- */
-export function rmSyncWithRetry(
-  targetPath: string,
-  options: {
-    recursive?: boolean;
-    force?: boolean;
-    maxRetries?: number;
-    initialDelay?: number;
-    logger?: Logger;
-  } = {},
-): void {
-  const { recursive = false, force = false, maxRetries = 5, initialDelay = 10, logger } = options;
-  let lastError: Error | null = null;
-
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
-    try {
-      fs.rmSync(targetPath, { recursive, force });
-      return; // Success!
-    } catch (error) {
-      const err = error as NodeJS.ErrnoException;
-      lastError = err;
-
-      // Only retry on file locking errors
-      if (err.code === "EPERM" || err.code === "EBUSY" || err.code === "EACCES") {
-        if (attempt < maxRetries - 1) {
-          const delay = initialDelay * 2 ** attempt;
-          logger?.log(
-            `Directory locked, retrying removal in ${delay}ms (attempt ${attempt + 1}/${maxRetries})`,
-            "debug",
-          );
-          // Synchronous sleep using busy-wait (not ideal but necessary for sync context)
-          const start = Date.now();
-          while (Date.now() - start < delay) {
-            // Busy wait
-          }
-          continue;
-        }
-      }
-
-      // Non-retryable error or max retries exceeded
-      throw error;
-    }
-  }
-
-  // Should never reach here, but TypeScript doesn't know that
-  throw lastError || new Error("Remove failed after retries");
 }
 
 // -------------

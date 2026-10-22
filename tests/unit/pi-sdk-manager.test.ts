@@ -14,9 +14,11 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { ClaudeLogParser } from "../../server/claude-log-parser.js";
+import { createPiModelRuntime } from "../../server/pi-model-catalog.js";
 import {
   applyEnvOverlay,
   buildEnvOverlay,
+  checkPiModel,
   configureModelRuntime,
   PiSdkManager,
   resolveProviderApiKey,
@@ -517,15 +519,110 @@ describe("configureModelRuntime runtime key injection", () => {
 });
 
 /**
- * Bedrock preflight: pi refuses amazon-bedrock requests when its auth
- * resolution finds no credential ("Provider is not configured"), so the
- * self-test must run that same resolution instead of taking the generic
- * unenforced-provider pass and deferring the failure to the first invoke.
- * PI_CODING_AGENT_DIR isolates pi's credential store from the developer's
- * real ~/.pi; the AWS env markers are cleared so only what each test sets is
- * visible.
+ * A provider the user's models.json defines names its key "$NAME" or
+ * "${NAME}"; pi interpolates that from the real process.env only. A key the
+ * codon supplies in its env block reaches the in-process session as a
+ * runtime key (configureModelRuntime), so checkPiModel's authentication —
+ * the same question spawn asks — passes with it and fails without it.
  */
-describe("PiSdkManager runSelfTest Bedrock credential preflight", () => {
+describe("checkPiModel with a models.json provider keyed from the codon env", () => {
+  const KEY_VAR = "GW_TEST_KEY";
+  const MANAGED = [
+    KEY_VAR,
+    "PI_CODING_AGENT_DIR",
+    "HANKWEAVE_MODEL_CATALOG_DIR",
+    "HANKWEAVE_RUNTIME_NO_ONLINE_MODEL_CHECKS",
+  ];
+  const savedEnv: Record<string, string | undefined> = {};
+  let originalFetch: typeof fetch;
+  let requests: string[];
+
+  beforeEach(() => {
+    for (const key of MANAGED) {
+      savedEnv[key] = process.env[key];
+      delete process.env[key];
+    }
+    process.env.PI_CODING_AGENT_DIR = path.join(tempDir, "pi-agent-dir");
+    fs.mkdirSync(process.env.PI_CODING_AGENT_DIR, { recursive: true });
+    process.env.HANKWEAVE_MODEL_CATALOG_DIR = path.join(tempDir, "model-catalog");
+    process.env.HANKWEAVE_RUNTIME_NO_ONLINE_MODEL_CHECKS = "1";
+    requests = [];
+    originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
+      const url = input instanceof Request ? input.url : String(input);
+      requests.push(url);
+      throw new Error(`unexpected network request: ${url}`);
+    }) as unknown as typeof fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    for (const key of MANAGED) {
+      if (savedEnv[key] !== undefined) process.env[key] = savedEnv[key];
+      else delete process.env[key];
+    }
+  });
+
+  /** Write the user's models.json with one gateway provider; returns its (unique) id. */
+  function writeGateway(apiKey: string): string {
+    const provider = `gw-${Math.random().toString(36).slice(2, 8)}`;
+    fs.writeFileSync(
+      path.join(process.env.PI_CODING_AGENT_DIR as string, "models.json"),
+      JSON.stringify({
+        providers: {
+          [provider]: {
+            baseUrl: "http://127.0.0.1:9/v1",
+            api: "openai-completions",
+            apiKey,
+            models: [{ id: "gw-model", contextWindow: 32_000, maxTokens: 4_096 }],
+          },
+        },
+      }),
+    );
+    return provider;
+  }
+
+  const authentication = (result: Awaited<ReturnType<typeof checkPiModel>>) =>
+    result.steps?.find((step) => step.name === "authentication");
+
+  for (const apiKey of [`$${KEY_VAR}`, `\${${KEY_VAR}}`]) {
+    test(`apiKey '${apiKey}': a key only in the codon env authenticates`, async () => {
+      const provider = writeGateway(apiKey);
+
+      const withKey = await checkPiModel(
+        provider,
+        "gw-model",
+        { ...process.env, [KEY_VAR]: "codon-only-gateway-key" },
+        { network: false },
+      );
+      expect(authentication(withKey)?.passed).toBe(true);
+      expect(withKey.ok).toBe(true);
+
+      const without = await checkPiModel(
+        provider,
+        "gw-model",
+        { ...process.env },
+        { network: false },
+      );
+      expect(without).toMatchObject({ ok: false, kind: "no-credentials" });
+      expect(authentication(without)?.passed).toBe(false);
+      expect(requests).toEqual([]);
+    }, 20000);
+  }
+});
+
+/**
+ * runSelfTest runs the same checks as startup model validation
+ * (checkPiModel): pi's own credential resolution (ModelRuntime.checkAuth)
+ * for every provider, then pi's catalog. Pi refuses a request when its auth
+ * resolution finds no credential, so the self-test must ask that same
+ * question instead of deferring the failure to the first invoke.
+ * PI_CODING_AGENT_DIR isolates pi's credential store from the developer's
+ * real ~/.pi; the AWS markers and provider keys are cleared so only what each
+ * test sets is visible, and online model checks are off so a catalog miss
+ * never asks pi.dev.
+ */
+describe("PiSdkManager runSelfTest credential and catalog checks", () => {
   const AWS_MARKERS = [
     "AWS_BEARER_TOKEN_BEDROCK",
     "AWS_PROFILE",
@@ -535,18 +632,33 @@ describe("PiSdkManager runSelfTest Bedrock credential preflight", () => {
     "AWS_CONTAINER_CREDENTIALS_FULL_URI",
     "AWS_WEB_IDENTITY_TOKEN_FILE",
   ];
+  const PROVIDER_KEYS = [
+    "DEEPSEEK_API_KEY",
+    "ZAI_API_KEY",
+    "OPENAI_API_KEY",
+    "OPENROUTER_API_KEY",
+  ].flatMap((key) => [key, `HANKWEAVE_${key}`]);
+  const MANAGED = [
+    ...AWS_MARKERS,
+    ...PROVIDER_KEYS,
+    "PI_CODING_AGENT_DIR",
+    "HANKWEAVE_MODEL_CATALOG_DIR",
+    "HANKWEAVE_RUNTIME_NO_ONLINE_MODEL_CHECKS",
+  ];
   const savedEnv: Record<string, string | undefined> = {};
 
   beforeEach(() => {
-    for (const key of [...AWS_MARKERS, "PI_CODING_AGENT_DIR"]) {
+    for (const key of MANAGED) {
       savedEnv[key] = process.env[key];
       delete process.env[key];
     }
     process.env.PI_CODING_AGENT_DIR = path.join(tempDir, "pi-agent-dir");
+    process.env.HANKWEAVE_MODEL_CATALOG_DIR = path.join(tempDir, "model-catalog");
+    process.env.HANKWEAVE_RUNTIME_NO_ONLINE_MODEL_CHECKS = "1";
   });
 
   afterEach(() => {
-    for (const key of [...AWS_MARKERS, "PI_CODING_AGENT_DIR"]) {
+    for (const key of MANAGED) {
       if (savedEnv[key] !== undefined) process.env[key] = savedEnv[key];
       else delete process.env[key];
     }
@@ -555,16 +667,21 @@ describe("PiSdkManager runSelfTest Bedrock credential preflight", () => {
   function makeManager(): PiSdkManager {
     logParser = new ClaudeLogParser({
       logPath: path.join(tempDir, "self-test.jsonl"),
-      codonId: "bedrock-preflight-test",
+      codonId: "pi-self-test",
       parsingInterval: 100,
     });
     return new PiSdkManager(tempDir, tempDir, logger, logParser);
   }
 
+  const check = (result: { checks: { name: string }[] }, name: string) =>
+    result.checks.find((c) => c.name === name) as
+      | { name: string; passed: boolean; message: string }
+      | undefined;
+
   test("no AWS credentials → authentication check fails with remediation", async () => {
     const result = await makeManager().runSelfTest("amazon-bedrock/deepseek.v3.2");
 
-    const auth = result.checks.find((check) => check.name === "authentication");
+    const auth = check(result, "authentication");
     expect(auth).toBeDefined();
     expect(auth?.passed).toBe(false);
     expect(auth?.message).toContain("AWS_BEARER_TOKEN_BEDROCK");
@@ -576,65 +693,105 @@ describe("PiSdkManager runSelfTest Bedrock credential preflight", () => {
 
     const result = await makeManager().runSelfTest("amazon-bedrock/deepseek.v3.2");
 
-    const auth = result.checks.find((check) => check.name === "authentication");
+    const auth = check(result, "authentication");
     expect(auth?.passed).toBe(true);
     expect(auth?.message).toContain("AWS_BEARER_TOKEN_BEDROCK");
   }, 20000);
 
-  test("non-Bedrock unenforced provider keeps the generic pass", async () => {
-    const result = await makeManager().runSelfTest("deepseek/deepseek-chat");
+  test("a provider without a key fails authentication, naming its env var and pi's auth store", async () => {
+    const result = await makeManager().runSelfTest("deepseek/deepseek-flash");
 
-    const auth = result.checks.find((check) => check.name === "authentication");
+    expect(check(result, "authentication")).toEqual({
+      name: "authentication",
+      passed: false,
+      message:
+        "No credentials for provider 'deepseek' (checked the environment, this codon's env block and Pi's auth store). Set DEEPSEEK_API_KEY, or add the key in Pi's auth store.",
+    });
+    // Credentials stop the check: the catalog is never consulted.
+    expect(check(result, "model_catalog")).toBeUndefined();
+    expect(result.overall.passed).toBe(false);
+  }, 20000);
+
+  test("a key reached only through the HANKWEAVE_ pass-through counts", async () => {
+    process.env.HANKWEAVE_DEEPSEEK_API_KEY = "test-deepseek-key";
+
+    const result = await makeManager().runSelfTest("deepseek/deepseek-flash");
+
+    expect(check(result, "authentication")?.passed).toBe(true);
+    expect(result.overall.passed).toBe(true);
+  }, 20000);
+
+  test("a key in pi's own auth store counts", async () => {
+    const agentDir = process.env.PI_CODING_AGENT_DIR as string;
+    fs.mkdirSync(agentDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(agentDir, "auth.json"),
+      JSON.stringify({ deepseek: { type: "api_key", key: "test-deepseek-key" } }),
+    );
+
+    const result = await makeManager().runSelfTest("deepseek/deepseek-flash");
+
+    const auth = check(result, "authentication");
     expect(auth?.passed).toBe(true);
-    expect(auth?.message).toContain("not credential-enforced");
+    expect(auth?.message).toContain("Credentials for provider 'deepseek'");
   }, 20000);
 
-  // Stage 2 of two-stage validation: after the registry (validateModel, stage
-  // 1), the self-test verifies the model against pi's own catalog — the gate
-  // spawn actually applies. Registry-known-but-pi-unknown models (the
-  // zai/glm-5.1 class) must fail HERE, at startup, not at codon launch.
+  // Pi's catalog is the gate spawn actually applies, so a model pi cannot
+  // serve (the zai/glm-5.1 class) fails HERE, at startup, not at codon launch.
   test("model_catalog passes for a catalog model", async () => {
-    const result = await makeManager().runSelfTest("deepseek/deepseek-v4-flash");
+    process.env.DEEPSEEK_API_KEY = "test-deepseek-key";
 
-    const catalog = result.checks.find((check) => check.name === "model_catalog");
+    const result = await makeManager().runSelfTest("deepseek/deepseek-flash");
+
+    const catalog = check(result, "model_catalog");
     expect(catalog?.passed).toBe(true);
-    expect(catalog?.message).toContain("deepseek/deepseek-v4-flash");
+    expect(catalog?.message).toContain("deepseek/deepseek-flash");
   }, 20000);
 
-  test("model_catalog fails for a registry-known model pi cannot serve", async () => {
+  test("model_catalog fails for a model pi cannot serve", async () => {
+    process.env.ZAI_API_KEY = "test-zai-key";
+
     const result = await makeManager().runSelfTest("zai/glm-5.1");
 
-    const catalog = result.checks.find((check) => check.name === "model_catalog");
+    const catalog = check(result, "model_catalog");
     expect(catalog?.passed).toBe(false);
-    expect(catalog?.message).toContain("Pi model not found: zai/glm-5.1");
-    // The suggestion list names catalog neighbors the user probably meant.
-    expect(catalog?.message).toContain("glm-5.2");
+    expect(catalog?.message).toContain(
+      "Pi has no model 'zai/glm-5.1' (checked its catalog; online model checks are off).",
+    );
+    // Pi's ids are candidates, ranked into the message by Models, not listed here.
+    expect(catalog?.message).not.toContain("Pi's zai models");
     expect(result.overall.passed).toBe(false);
   }, 20000);
 
   test("model_catalog resolves reasoning-effort suffixes to the base model", async () => {
-    const result = await makeManager().runSelfTest("openai-codex/gpt-5.6-terra-high");
+    process.env.OPENAI_API_KEY = "test-openai-key";
 
-    const catalog = result.checks.find((check) => check.name === "model_catalog");
-    expect(catalog?.passed).toBe(true);
+    const result = await makeManager().runSelfTest("openai/gpt-5.6-terra-high");
+
+    expect(check(result, "model_catalog")?.passed).toBe(true);
   }, 20000);
 
   test("model_catalog enforces pi's static openrouter list", async () => {
+    process.env.OPENROUTER_API_KEY = "test-openrouter-key";
+
     const known = await makeManager().runSelfTest("openrouter/moonshotai/kimi-k3");
-    expect(known.checks.find((check) => check.name === "model_catalog")?.passed).toBe(true);
+    expect(check(known, "model_catalog")?.passed).toBe(true);
 
     const unknown = await makeManager().runSelfTest("openrouter/some-org/definitely-not-real");
-    const catalog = unknown.checks.find((check) => check.name === "model_catalog");
+    const catalog = check(unknown, "model_catalog");
     expect(catalog?.passed).toBe(false);
-    expect(catalog?.message).toContain("Pi model not found");
+    expect(catalog?.message).toContain("Pi has no model 'openrouter/some-org/definitely-not-real'");
   }, 40000);
 
-  test("model_catalog reports an unknown provider with the known-provider list", async () => {
+  test("a provider pi does not know is named as such, before credentials or the catalog", async () => {
+    // Startup rejects such a spelling at stage 0 (no harness runs the
+    // provider); called directly, Pi says it has no such provider.
     const result = await makeManager().runSelfTest("nosuchprovider/some-model");
 
-    const catalog = result.checks.find((check) => check.name === "model_catalog");
-    expect(catalog?.passed).toBe(false);
-    expect(catalog?.message).toContain("Unknown pi provider 'nosuchprovider'");
+    const auth = check(result, "authentication");
+    expect(auth?.passed).toBe(false);
+    expect(auth?.message).toContain("Pi has no provider 'nosuchprovider'. Pi's providers: ");
+    expect(check(result, "model_catalog")).toBeUndefined();
   }, 20000);
 });
 
@@ -654,13 +811,21 @@ describe("PiSdkManager runSelfTest Bedrock credential preflight", () => {
  */
 describe("PiSdkManager setup failure routing", () => {
   const savedEnv: Record<string, string | undefined> = {};
-  const CLEARED_VARS = ["OPENAI_API_KEY", "HANKWEAVE_OPENAI_API_KEY"];
+  const CLEARED_VARS = [
+    "OPENAI_API_KEY",
+    "HANKWEAVE_OPENAI_API_KEY",
+    "PI_CODING_AGENT_DIR",
+    "HANKWEAVE_RUNTIME_NO_ONLINE_MODEL_CHECKS",
+  ];
 
   beforeEach(() => {
     for (const key of CLEARED_VARS) {
       savedEnv[key] = process.env[key];
       delete process.env[key];
     }
+    // An empty pi credential store, and no pi.dev refresh for the lookup.
+    process.env.PI_CODING_AGENT_DIR = path.join(tempDir, "pi-agent-dir");
+    process.env.HANKWEAVE_RUNTIME_NO_ONLINE_MODEL_CHECKS = "1";
   });
 
   afterEach(() => {
@@ -682,7 +847,7 @@ describe("PiSdkManager setup failure routing", () => {
     const codon = createTestCodon({
       id: "setup-failure",
       name: "Setup failure",
-      model: "pi/openai/gpt-test-model",
+      model: "pi/openai/gpt-5.2",
       continuationMode: "fresh",
       promptText: "irrelevant",
     });
@@ -715,10 +880,142 @@ describe("PiSdkManager setup failure routing", () => {
     const result = lines.find((msg) => msg.type === "result") as ResultMessage;
     expect(result).toBeDefined();
     expect(result.is_error).toBe(true);
-    // The real error text must survive — CodonRunner classifies "api key"
-    // text as a permanent auth failure, honoring onFailure policy semantics.
-    expect(String(result.result)).toContain("Missing API key for provider 'openai'");
+    // The real error text must survive, naming what is missing and where pi
+    // looked; with no session established CodonRunner classifies it as a
+    // permanent local setup failure, honoring onFailure policy semantics.
+    expect(String(result.result)).toContain(
+      "No credentials for provider 'openai' (checked the environment, this codon's env block and Pi's auth store). Set OPENAI_API_KEY",
+    );
   }, 15000);
+});
+
+/**
+ * A model Models adopted into pi's catalog at startup (provenance evidence
+ * "adopted from …") lives only in that process's generated models.json. A
+ * resumed plan's codon carries the persisted record, so spawn adopts it
+ * again — sibling taken from pi's own models — instead of failing with "Pi
+ * model not found". Every network request is refused: the session's first
+ * prompt never leaves the process, and the test kills it once spawned.
+ */
+describe("PiSdkManager spawn-time re-adoption", () => {
+  // xai: a provider no other test lists the models of. Injected rows last
+  // for the process (every test file shares it), so the ids are unique too.
+  const MODEL_ID = "grok-spawn-readopt-1";
+  const MANAGED = [
+    "XAI_API_KEY",
+    "HANKWEAVE_XAI_API_KEY",
+    "PI_CODING_AGENT_DIR",
+    "HANKWEAVE_MODEL_CATALOG_DIR",
+    "HANKWEAVE_RUNTIME_NO_ONLINE_MODEL_CHECKS",
+  ];
+  const savedEnv: Record<string, string | undefined> = {};
+  let originalFetch: typeof fetch;
+  let requests: string[];
+
+  beforeEach(() => {
+    for (const key of MANAGED) {
+      savedEnv[key] = process.env[key];
+      delete process.env[key];
+    }
+    process.env.PI_CODING_AGENT_DIR = path.join(tempDir, "pi-agent-dir");
+    process.env.HANKWEAVE_MODEL_CATALOG_DIR = path.join(tempDir, "model-catalog");
+    process.env.HANKWEAVE_RUNTIME_NO_ONLINE_MODEL_CHECKS = "1";
+    process.env.XAI_API_KEY = "xai-test-never-valid";
+    requests = [];
+    originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
+      const url = input instanceof Request ? input.url : String(input);
+      requests.push(url);
+      throw new Error(`unexpected network request: ${url}`);
+    }) as unknown as typeof fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    for (const key of MANAGED) {
+      if (savedEnv[key] !== undefined) process.env[key] = savedEnv[key];
+      else delete process.env[key];
+    }
+  });
+
+  /** A codon whose (persisted) model pi's catalog lacks, with the given evidence and confidence. */
+  function codonWithEvidence(
+    evidence: string,
+    modelId = MODEL_ID,
+    confidence: "user" | "harness" = "user",
+  ) {
+    const codon = createTestCodon({
+      id: "readopt",
+      name: "Re-adopt",
+      model: "xai/grok-4.3",
+      continuationMode: "fresh",
+      promptText: "irrelevant",
+    });
+    codon.model = {
+      ...codon.model,
+      providerId: "xai",
+      modelId,
+      name: "Grok Spawn Re-adopt",
+      provenance: {
+        confidence,
+        source: "hank.json models",
+        priceStatus: "known",
+        evidence,
+      },
+    };
+    return codon;
+  }
+
+  function makeManager(logPath: string): PiSdkManager {
+    logParser = new ClaudeLogParser({ logPath, codonId: "readopt", parsingInterval: 100 });
+    return new PiSdkManager(tempDir, tempDir, logger, logParser);
+  }
+
+  test("an adopted model pi lacks is injected again and the session starts", async () => {
+    const logPath = path.join(tempDir, "readopt.jsonl");
+    const manager = makeManager(logPath);
+    expect((await createPiModelRuntime()).getModel("xai", MODEL_ID)).toBeUndefined();
+
+    await manager.spawn(codonWithEvidence("adopted from xai/grok-4.3"), null, {
+      logPath,
+    });
+    const started = manager.isRunning();
+    // kill() waits for the aborted prompt, so nothing of it outlives the test.
+    await manager.kill();
+
+    expect(started).toBe(true);
+    const injected = (await createPiModelRuntime()).getModel("xai", MODEL_ID);
+    expect(injected).toMatchObject({ id: MODEL_ID, name: "Grok Spawn Re-adopt" });
+    expect(fs.readFileSync(path.join(tempDir, "test.log"), "utf8")).toContain(
+      `Injected xai/${MODEL_ID} into pi's catalog`,
+    );
+    // Only the session's own (refused) model request was attempted: no pi.dev refresh.
+    expect(requests.filter((url) => !url.startsWith("https://api.x.ai/"))).toEqual([]);
+  }, 20000);
+
+  test("a model pi lacks whose record nothing vouches for fails setup with 'Pi model not found'", async () => {
+    const logPath = path.join(tempDir, "not-adopted.jsonl");
+    const manager = makeManager(logPath);
+    const exit = new Promise<number>((resolve) => manager.on("exit", resolve));
+
+    // Process-wide injected rows persist: a fresh id, never injected.
+    // A harness-only record (Pi's own row, now gone): nothing to adopt from.
+    await manager.spawn(codonWithEvidence("pi catalog", "grok-spawn-readopt-2", "harness"), null, {
+      logPath,
+    });
+
+    expect(await exit).toBe(1);
+    const result = fs
+      .readFileSync(logPath, "utf8")
+      .split("\n")
+      .filter((line) => line.trim())
+      .map((line) => JSON.parse(line))
+      .find((msg) => msg.type === "result") as ResultMessage;
+    expect(String(result.result)).toContain(
+      "Pi model not found: grok-spawn-readopt-2 (provider=xai, model=grok-spawn-readopt-2)",
+    );
+    expect(requests.filter((url) => url.startsWith("https://pi.dev/"))).toEqual([]);
+  }, 20000);
 });
 
 /**

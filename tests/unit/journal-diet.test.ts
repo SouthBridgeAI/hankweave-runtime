@@ -21,8 +21,6 @@ import {
   ensureJournalRestored,
   isDietedEventsDir,
   readJournalDietMeta,
-  registerProcessOwnedLock,
-  releaseProcessOwnedLock,
   restoreJournal,
 } from "../../server/storage/journal-diet.js";
 import { EventId } from "../../server/types/branded-types.js";
@@ -557,83 +555,6 @@ describe("journal diet", () => {
         // The surviving artifact was not touched.
         expect(fsSync.existsSync(path.join(dir, "events.jsonl.zst"))).toBe(true);
         expect(fsSync.existsSync(path.join(dir, "events.jsonl"))).toBe(false);
-      } finally {
-        await rm(execDir, { recursive: true, force: true });
-      }
-    });
-
-    it("ensureJournalRestored refuses to mutate a directory owned by a live runtime", async () => {
-      const execDir = await mkdtemp(path.join(tmpdir(), "journal-diet-exec-"));
-      try {
-        const dir = path.join(execDir, ".hankweave", "events");
-        fsSync.mkdirSync(dir, { recursive: true });
-        const storage = new FileEventStorage(dir);
-        await storage.initialize();
-        await storage.appendMany([fileUpdatedEvent("ev-1", "a.md", syntheticBody(29, 8192))]);
-        await storage.close();
-        await dietJournal(dir);
-        const lockPath = path.join(execDir, ".hankweave", "runtime.lock");
-
-        // Live FOREIGN owner (the test runner's pid): restore must refuse.
-        await writeFile(
-          lockPath,
-          JSON.stringify({ pid: process.ppid, lastHeartbeat: new Date().toISOString() }),
-        );
-        await expect(ensureJournalRestored(execDir)).rejects.toThrow(/live runtime/);
-        // Legacy bare-pid lock, same liveness: refuse.
-        await writeFile(lockPath, String(process.ppid));
-        await expect(ensureJournalRestored(execDir)).rejects.toThrow(/live runtime/);
-        // Unparseable lock: liveness unknown — fail closed.
-        await writeFile(lockPath, "@@@ not a lock @@@");
-        await expect(ensureJournalRestored(execDir)).rejects.toThrow(/could not be parsed/);
-        expect(fsSync.existsSync(path.join(dir, "events.jsonl"))).toBe(false);
-
-        // A lock naming OUR OWN pid that this process REGISTERED is a live
-        // in-process runtime: refuse.
-        await writeFile(
-          lockPath,
-          JSON.stringify({ pid: process.pid, lastHeartbeat: new Date().toISOString() }),
-        );
-        registerProcessOwnedLock(lockPath, "test-owner-token");
-        try {
-          await expect(ensureJournalRestored(execDir)).rejects.toThrow(/this process/);
-        } finally {
-          releaseProcessOwnedLock("test-owner-token");
-        }
-        // Own-pid, unregistered, but heartbeat still FRESH: possibly a live
-        // incumbent in another pid namespace sharing the volume — refuse.
-        await expect(ensureJournalRestored(execDir)).rejects.toThrow(/another pid namespace/);
-
-        // Own-pid, unregistered, heartbeat lapsed: the true recycled
-        // leftover (restarted PID-1 container shape) — proceed.
-        await writeFile(
-          lockPath,
-          JSON.stringify({
-            pid: process.pid,
-            lastHeartbeat: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
-          }),
-        );
-        expect((await ensureJournalRestored(execDir))?.restored).toBe(true);
-
-        // Dead owner: the lock is inert and the restore proceeds.
-        await dietJournal(dir);
-        await writeFile(
-          lockPath,
-          JSON.stringify({ pid: 999_999_999, lastHeartbeat: new Date().toISOString() }),
-        );
-        const report = await ensureJournalRestored(execDir);
-        expect(report?.restored).toBe(true);
-
-        // Stale-pair cleanup refuses under a live owner too: that shape is a
-        // finalize diet mid-promotion, and the pair must survive.
-        await dietJournal(dir);
-        await restoreJournal(dir); // journal + pair side by side
-        await writeFile(
-          lockPath,
-          JSON.stringify({ pid: process.ppid, lastHeartbeat: new Date().toISOString() }),
-        );
-        await expect(ensureJournalRestored(execDir)).rejects.toThrow(/live runtime/);
-        expect(fsSync.existsSync(path.join(dir, "events.jsonl.zst"))).toBe(true);
       } finally {
         await rm(execDir, { recursive: true, force: true });
       }

@@ -2,9 +2,9 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import { z } from "zod";
-import { LlmProviderRegistry } from "../../server/llm/llm-provider-registry.js";
-import { PROVIDER_DEFINITIONS } from "../../server/llm/provider-config.js";
+import { bundledCatalogSnapshot } from "../../server/llm/internal/catalog-store.js";
 import type { ServerEvent } from "../../server/schemas/event-schemas.js";
+import { ProviderHealth } from "../../server/sentinels/provider-health.js";
 import { SentinelManager } from "../../server/sentinels/sentinel-manager.js";
 import { CodonId, EventId } from "../../server/types/branded-types.js";
 import type { SentinelConfig } from "../../server/types/sentinel-types.js";
@@ -19,11 +19,12 @@ describe("Structured Output E2E (Real Providers)", () => {
   const hasAnthropicKey = !!process.env.ANTHROPIC_API_KEY;
   const hasOpenAIKey = !!process.env.OPENAI_API_KEY;
   const pickCheapestStableOpenAIModel = (
-    registry: LlmProviderRegistry,
+    registry: ProviderHealth,
   ): { fullId: string; inputCost: number } | null => {
-    const candidates = registry
-      .getAvailableModels()
-      .filter((m) => m.startsWith("openai/"))
+    const candidates = bundledCatalogSnapshot()
+      .rows.filter((row) => row.providerId === "openai")
+      .map((row) => `${row.providerId}/${row.modelId}`)
+      .filter((fullId) => registry.isModelAvailable(fullId))
       .map((fullId) => {
         const info = registry.getModelInfo(fullId);
         if (!info.success) return null;
@@ -41,6 +42,11 @@ describe("Structured Output E2E (Real Providers)", () => {
 
     return candidates[0] ?? null;
   };
+  // Fast, cheap models for provider-agnostic tests, in preference order
+  const pickFastAvailableModel = (registry: ProviderHealth): string | null =>
+    ["anthropic/claude-haiku-4-5", "openai/gpt-4o-mini", "google/gemini-2.5-flash"].find((model) =>
+      registry.isModelAvailable(model),
+    ) ?? null;
 
   beforeEach(async () => {
     logs = [];
@@ -74,7 +80,7 @@ describe("Structured Output E2E (Real Providers)", () => {
   it.if(hasAnthropicKey)(
     "Anthropic - complex nested object",
     async () => {
-      const realRegistry = new LlmProviderRegistry({
+      const realRegistry = new ProviderHealth({
         logger: mockLogger,
         performHealthCheckOnInit: true,
       });
@@ -182,7 +188,7 @@ describe("Structured Output E2E (Real Providers)", () => {
   it.if(hasOpenAIKey)(
     "OpenAI - array output",
     async () => {
-      const realRegistry = new LlmProviderRegistry({
+      const realRegistry = new ProviderHealth({
         logger: mockLogger,
         performHealthCheckOnInit: true,
       });
@@ -302,7 +308,7 @@ describe("Structured Output E2E (Real Providers)", () => {
   it.if(hasAnthropicKey)(
     "Enum output - plain strings",
     async () => {
-      const realRegistry = new LlmProviderRegistry({
+      const realRegistry = new ProviderHealth({
         logger: mockLogger,
         performHealthCheckOnInit: true,
       });
@@ -394,7 +400,7 @@ describe("Structured Output E2E (Real Providers)", () => {
   it.if(hasAnthropicKey)(
     "Conversational mode with structured output",
     async () => {
-      const realRegistry = new LlmProviderRegistry({
+      const realRegistry = new ProviderHealth({
         logger: mockLogger,
         performHealthCheckOnInit: true,
       });
@@ -525,7 +531,7 @@ describe("Structured Output E2E (Real Providers)", () => {
   it.if(hasAnthropicKey)(
     "Full sentinel flow with real provider",
     async () => {
-      const realRegistry = new LlmProviderRegistry({
+      const realRegistry = new ProviderHealth({
         logger: mockLogger,
         performHealthCheckOnInit: true,
       });
@@ -638,7 +644,7 @@ describe("Structured Output E2E (Real Providers)", () => {
   it.if(hasOpenAIKey)(
     "OpenAI - simple object generation",
     async () => {
-      const realRegistry = new LlmProviderRegistry({
+      const realRegistry = new ProviderHealth({
         logger: mockLogger,
         performHealthCheckOnInit: true,
       });
@@ -747,7 +753,7 @@ describe("Structured Output E2E (Real Providers)", () => {
   it.if(hasAnthropicKey || hasOpenAIKey)(
     "Schema file loading with real provider",
     async () => {
-      const realRegistry = new LlmProviderRegistry({
+      const realRegistry = new ProviderHealth({
         logger: mockLogger,
         performHealthCheckOnInit: true,
       });
@@ -756,25 +762,7 @@ describe("Structured Output E2E (Real Providers)", () => {
       await realRegistry.performHealthChecks();
 
       // Find a fast, cheap model for testing
-      // Prefer claude-haiku-4-5 (current), avoid deprecated claude-3-5-haiku-latest
-      let testModel: string | null = null;
-      const availableModels = realRegistry.getAvailableModels();
-      const preferredModel =
-        availableModels.find((m) => m === "anthropic/claude-haiku-4-5") ||
-        availableModels.find((m) => m.includes("haiku") && !m.includes("3-5-haiku"));
-      if (preferredModel) {
-        testModel = preferredModel;
-      } else {
-        for (const def of PROVIDER_DEFINITIONS) {
-          if (process.env[def.apiKeyEnvVar]) {
-            const models = availableModels.filter((m) => m.startsWith(`${def.id}/`));
-            if (models.length > 0) {
-              testModel = models[0];
-              break;
-            }
-          }
-        }
-      }
+      const testModel = pickFastAvailableModel(realRegistry);
 
       if (!testModel) {
         console.log("⚠️ No models available");
@@ -876,7 +864,7 @@ describe("Structured Output E2E (Real Providers)", () => {
   it.if(hasAnthropicKey || hasOpenAIKey)(
     "Cost tracking with structured output",
     async () => {
-      const realRegistry = new LlmProviderRegistry({
+      const realRegistry = new ProviderHealth({
         logger: mockLogger,
         performHealthCheckOnInit: true,
       });
@@ -885,25 +873,7 @@ describe("Structured Output E2E (Real Providers)", () => {
       await realRegistry.performHealthChecks();
 
       // Find a fast, cheap model for testing
-      // Prefer claude-haiku-4-5 (current), avoid deprecated claude-3-5-haiku-latest
-      let testModel: string | null = null;
-      const availableModels = realRegistry.getAvailableModels();
-      const preferredModel =
-        availableModels.find((m) => m === "anthropic/claude-haiku-4-5") ||
-        availableModels.find((m) => m.includes("haiku") && !m.includes("3-5-haiku"));
-      if (preferredModel) {
-        testModel = preferredModel;
-      } else {
-        for (const def of PROVIDER_DEFINITIONS) {
-          if (process.env[def.apiKeyEnvVar]) {
-            const models = availableModels.filter((m) => m.startsWith(`${def.id}/`));
-            if (models.length > 0) {
-              testModel = models[0];
-              break;
-            }
-          }
-        }
-      }
+      const testModel = pickFastAvailableModel(realRegistry);
 
       if (!testModel) {
         console.log("⚠️ No models available");

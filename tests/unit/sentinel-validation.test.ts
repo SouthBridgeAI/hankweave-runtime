@@ -29,7 +29,7 @@ describe("Sentinel Configuration Validation", () => {
           milliseconds: 2500,
         },
         userPromptText: "Summarize the following events: {{events}}",
-        model: "sonnet",
+        model: "anthropic/claude-sonnet-4-6",
         output: {
           format: "text",
           file: "narrator.log",
@@ -44,7 +44,7 @@ describe("Sentinel Configuration Validation", () => {
       const config: SentinelConfig = {
         id: "error-detector",
         name: "Error Pattern Detector",
-        model: "anthropic/claude-3-5-sonnet-20241022",
+        model: "anthropic/claude-sonnet-4-5",
         trigger: {
           type: "sequence",
           interestFilter: {
@@ -255,7 +255,7 @@ describe("Sentinel Configuration Validation", () => {
       const config: SentinelConfig = {
         id: "test-sentinel",
         name: "Test Sentinel",
-        model: "anthropic/claude-3-5-sonnet-20241022",
+        model: "anthropic/claude-sonnet-4-5",
         trigger: {
           type: "event",
           on: ["info"],
@@ -274,7 +274,7 @@ describe("Sentinel Configuration Validation", () => {
       const config: SentinelConfig = {
         id: "test-sentinel",
         name: "Test Sentinel",
-        model: "anthropic/claude-3-5-sonnet-20241022",
+        model: "anthropic/claude-sonnet-4-5",
         trigger: {
           type: "event",
           on: ["info"],
@@ -293,7 +293,7 @@ describe("Sentinel Configuration Validation", () => {
       const config: SentinelConfig = {
         id: "test-sentinel",
         name: "Test Sentinel",
-        model: "anthropic/claude-3-5-sonnet-20241022",
+        model: "anthropic/claude-sonnet-4-5",
         trigger: {
           type: "event",
           on: ["info"],
@@ -312,7 +312,7 @@ describe("Sentinel Configuration Validation", () => {
       const config: SentinelConfig = {
         id: "test-sentinel",
         name: "Test Sentinel",
-        model: "anthropic/claude-3-5-sonnet-20241022",
+        model: "anthropic/claude-sonnet-4-5",
         trigger: {
           type: "event",
           on: ["info"],
@@ -332,7 +332,7 @@ describe("Sentinel Configuration Validation", () => {
       const config: SentinelConfig = {
         id: "test-sentinel",
         name: "Test Sentinel",
-        model: "anthropic/claude-3-5-sonnet-20241022",
+        model: "anthropic/claude-sonnet-4-5",
         trigger: {
           type: "event",
           on: ["info"],
@@ -352,7 +352,7 @@ describe("Sentinel Configuration Validation", () => {
       const config: SentinelConfig = {
         id: "test-sentinel",
         name: "Test Sentinel",
-        model: "anthropic/claude-3-5-sonnet-20241022",
+        model: "anthropic/claude-sonnet-4-5",
         trigger: {
           type: "event",
           on: ["info"],
@@ -372,7 +372,7 @@ describe("Sentinel Configuration Validation", () => {
       const config: SentinelConfig = {
         id: "test-sentinel",
         name: "Test Sentinel",
-        model: "anthropic/claude-3-5-sonnet-20241022",
+        model: "anthropic/claude-sonnet-4-5",
         trigger: {
           type: "event",
           on: ["info"],
@@ -394,7 +394,7 @@ describe("Sentinel Configuration Validation", () => {
       const config = {
         id: "test-sentinel",
         name: "Test Sentinel",
-        model: "anthropic/claude-3-5-sonnet-20241022",
+        model: "anthropic/claude-sonnet-4-5",
         trigger: {
           type: "event",
           on: ["info"],
@@ -420,7 +420,7 @@ describe("Sentinel Configuration Validation", () => {
       const config = {
         id: "test-sentinel",
         name: "Test Sentinel",
-        model: "anthropic/claude-3-5-sonnet-20241022",
+        model: "anthropic/claude-sonnet-4-5",
         trigger: {
           type: "event",
           on: ["info"],
@@ -447,7 +447,7 @@ describe("Sentinel Configuration Validation", () => {
       const config = {
         id: "test-structured",
         name: "Test Structured",
-        model: "anthropic/claude",
+        model: "anthropic/claude-haiku-4-5",
         trigger: { type: "event" as const, on: ["file.updated" as const] },
         execution: { strategy: "immediate" as const },
         userPromptText: "Test",
@@ -479,7 +479,7 @@ describe("Sentinel Configuration Validation", () => {
       const config = {
         id: "test-enum",
         name: "Test Enum",
-        model: "anthropic/claude",
+        model: "anthropic/claude-haiku-4-5",
         trigger: { type: "event" as const, on: ["codon.completed" as const] },
         execution: { strategy: "immediate" as const },
         userPromptText: "Test",
@@ -495,7 +495,7 @@ describe("Sentinel Configuration Validation", () => {
       const config = {
         id: "test-no-schema",
         name: "Test No Schema",
-        model: "anthropic/claude",
+        model: "anthropic/claude-haiku-4-5",
         trigger: { type: "event" as const, on: ["file.updated" as const] },
         execution: { strategy: "immediate" as const },
         userPromptText: "Test",
@@ -510,7 +510,7 @@ describe("Sentinel Configuration Validation", () => {
       const config = {
         id: "test-enum-no-values",
         name: "Test Enum No Values",
-        model: "anthropic/claude",
+        model: "anthropic/claude-haiku-4-5",
         trigger: { type: "event" as const, on: ["file.updated" as const] },
         execution: { strategy: "immediate" as const },
         userPromptText: "Test",

@@ -15,13 +15,14 @@ export interface ProviderDefinition {
   createProvider: (apiKey: string) => Provider;
   defaultHeaders?: Record<string, string>; // Optional headers for the provider
   /**
-   * Preferred models for health checks, tried in order before falling back
-   * to findCheapestModel. Use stable, non-preview model IDs that the
-   * provider is unlikely to deprecate. A function form is evaluated at
-   * check time for providers whose usable model IDs depend on the
-   * environment (amazon-bedrock: geo-prefixed inference profiles).
+   * Models for a generation-based health check, tried in order. Only
+   * providers without a model-list
+   * probe need this (amazon-bedrock — see provider-probe.ts); the rest are
+   * checked by listing models, which needs no model id. A function form is
+   * evaluated at check time for providers whose usable model IDs depend on
+   * the environment (amazon-bedrock: geo-prefixed inference profiles).
    */
-  healthCheckModels?: string[] | (() => string[]);
+  healthCheckModels?: () => string[];
   /**
    * For providers authenticated by more than a single API key
    * (amazon-bedrock). When set and apiKeyEnvVar found nothing, the registry
@@ -80,7 +81,6 @@ export const PROVIDER_DEFINITIONS: ProviderDefinition[] = [
         apiKey,
         // Can add baseURL for proxies if needed in the future
       }),
-    healthCheckModels: ["claude-haiku-4-5"],
   },
   {
     id: "openai",
@@ -90,7 +90,6 @@ export const PROVIDER_DEFINITIONS: ProviderDefinition[] = [
         apiKey,
         // Default OpenAI provider configuration - no additional options needed
       }),
-    healthCheckModels: ["gpt-5.4-mini"],
   },
   {
     id: "groq",
@@ -110,7 +109,6 @@ export const PROVIDER_DEFINITIONS: ProviderDefinition[] = [
       createGoogleGenerativeAI({
         apiKey,
       }),
-    healthCheckModels: ["gemini-flash-latest"],
   },
   {
     // DeepSeek exposes an OpenAI-compatible API, so we reuse the OpenAI
@@ -137,7 +135,6 @@ export const PROVIDER_DEFINITIONS: ProviderDefinition[] = [
         },
       }) as unknown as Provider;
     },
-    healthCheckModels: ["deepseek-v4-flash"],
   },
   {
     // Amazon Bedrock, explicit-env-credentials only: bearer token

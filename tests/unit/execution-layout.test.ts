@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { DEFAULT_CONFIG } from "../../server/config.js";
 import { ExecutionLayout } from "../../server/execution-layout.js";
 
 describe("execution-layout", () => {
@@ -10,6 +9,7 @@ describe("execution-layout", () => {
     // These are the names other tools, docs and user scripts rely on. Changing
     // one is a migration, not a refactor.
     expect(ExecutionLayout.STATE_DIR).toBe(".hankweave");
+    expect(ExecutionLayout.RUNTIME_LOCK).toBe(".hankweave-runtime.lock");
     expect(ExecutionLayout.AGENT_ROOT).toBe("agentRoot");
     expect(ExecutionLayout.RIG_ARCHIVE).toBe("rigArchive");
     expect(ExecutionLayout.DATA_SOURCE).toBe("read_only_data_source");
@@ -20,7 +20,6 @@ describe("execution-layout", () => {
     expect(ExecutionLayout.EXECUTION_META_FILE).toBe("execution-meta.json");
     expect(ExecutionLayout.STATE_FILE).toBe("state.json");
     expect(ExecutionLayout.STATE_BACKUP_FILE).toBe("state.json.bak");
-    expect(ExecutionLayout.RUNTIME_LOCK_FILE).toBe("runtime.lock");
     expect(ExecutionLayout.ARCHIVE_MANIFEST_FILE).toBe("archive-manifest.json");
     expect(ExecutionLayout.STATE_BACKUP_PREFIX).toBe(".hankweave.backup-");
     expect(ExecutionLayout.QUARANTINE_PREFIX).toBe(".hankweavecheckpoints-quarantine-");
@@ -36,6 +35,7 @@ describe("execution-layout", () => {
     expect({ ...layout }).toEqual({
       executionPath: root,
       stateDir: state,
+      runtimeLockPath: path.join(root, ".hankweave-runtime.lock"),
       agentRootPath: agentRoot,
       rigArchivePath: path.join(root, "rigArchive"),
       dataPathInExecutionDir: path.join(agentRoot, "read_only_data_source"),
@@ -44,7 +44,6 @@ describe("execution-layout", () => {
       metaPath: path.join(state, "execution-meta.json"),
       statePath: path.join(state, "state.json"),
       stateBackupPath: path.join(state, "state.json.bak"),
-      lockPath: path.join(state, "runtime.lock"),
       eventsDir: path.join(state, "events"),
       runsDir: path.join(state, "runs"),
       archiveManifestPath: path.join(state, "archive-manifest.json"),
@@ -65,11 +64,6 @@ describe("execution-layout", () => {
     const root = path.join(os.tmpdir(), `hw-layout-pure-${Date.now()}`);
     new ExecutionLayout(root);
     expect(fs.existsSync(root)).toBe(false);
-  });
-
-  test("DEFAULT_CONFIG.lockFile is the layout's runtime.lock relative to the execution dir", () => {
-    const root = "/some/exec";
-    expect(path.join(root, DEFAULT_CONFIG.lockFile)).toBe(new ExecutionLayout(root).lockPath);
   });
 
   test("timestamped siblings sit beside the directory they back up", () => {
@@ -113,6 +107,8 @@ describe("mandatory exclusion policy follows the layout", () => {
   // ANY depth (defense in depth for a work tree that is the execution
   // directory itself).
   const protectedPaths = [
+    ".hankweave-runtime.lock",
+    "nested/.hankweave-runtime.lock/marker",
     ".hankweave/state.json",
     ".hankweave/checkpoints/notes.txt",
     ".hankweave/checkpoints/.hankweavecheckpoints/HEAD",

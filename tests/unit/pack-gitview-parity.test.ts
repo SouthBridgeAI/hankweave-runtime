@@ -177,7 +177,7 @@ function buildDefaultsDropHank(): string {
           {
             id: "one",
             name: "one",
-            model: "sonnet",
+            model: "anthropic/claude-sonnet-4-6",
             continuationMode: "fresh",
             promptFile: "prompts/one.md",
             rigSetup: [{ type: "copy", copy: { from: "rig", to: "rig" } }],

@@ -15,7 +15,8 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { loadHankFile } from "./config.js";
+import { z } from "zod";
+import { readRawHankJson } from "./config.js";
 
 // Cache TTL removed — replaced with git ls-remote hash comparison for branches.
 
@@ -598,33 +599,48 @@ async function fetchRemoteHank(parsed: RemoteHankRef, cacheDir: string): Promise
   writeCacheMeta(cacheDir, parsed.ref, parsed.isBranch);
 }
 
+/** Just what a summary displays; full validation happens later in validateHank. */
+const hankSummarySchema = z.object({
+  meta: z.object({ name: z.string().optional(), description: z.string().optional() }).optional(),
+  hank: z.array(z.unknown()),
+});
+const summaryItemSchema = z.union([
+  z.object({ type: z.literal("loop"), codons: z.array(z.unknown()) }),
+  z.object({ name: z.string() }),
+]);
+
 /**
- * Get a summary of a hank for display.
+ * Get a summary of a hank for display. Reads names only: model validation
+ * waits for validateHank, after the model catalog has had its chance to
+ * learn a model newer than the bundled data.
  *
  * @param hankPath - Local path to hank.json
  * @param sourceUrl - Original remote URL
  * @param ref - Git ref used
  * @returns Hank summary
+ * @throws Error when the file is missing or has no `hank` array
  */
 export function getHankSummary(hankPath: string, sourceUrl: string, ref: string): HankSummary {
-  const hankFile = loadHankFile({ hankPath });
+  const parsed = hankSummarySchema.safeParse(readRawHankJson(hankPath));
+  if (!parsed.success) {
+    throw new Error(`Invalid hank file ${hankPath}: expected a "hank" array of codons`);
+  }
 
   // Flatten codons to get all codon names (handling loops)
   const codonNames: string[] = [];
-  function extractCodonNames(configs: typeof hankFile.hank): void {
+  function extractCodonNames(configs: readonly unknown[]): void {
     for (const config of configs) {
-      if (config.type === "loop") {
-        extractCodonNames(config.codons);
-      } else {
-        codonNames.push(config.name);
-      }
+      const item = summaryItemSchema.safeParse(config);
+      if (!item.success) continue;
+      if ("codons" in item.data) extractCodonNames(item.data.codons);
+      else codonNames.push(item.data.name);
     }
   }
-  extractCodonNames(hankFile.hank);
+  extractCodonNames(parsed.data.hank);
 
   return {
-    name: hankFile.meta?.name,
-    description: hankFile.meta?.description,
+    name: parsed.data.meta?.name,
+    description: parsed.data.meta?.description,
     codonCount: codonNames.length,
     codonNames,
     sourceUrl,

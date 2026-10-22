@@ -23,9 +23,14 @@ describe("hw-trace kill/resume lifecycle", () => {
     });
 
     const execDir = hankweave.executionDir;
-    // Both runs append to the same server.log, so count upload markers rather
-    // than checking for their presence.
-    const traceUploadCount = () => hankweave.serverLogFile().split("> Uploading trace:").length - 1;
+    // Upload logs go to stdout after ownership release, never back into the execution.
+    let uploadOutput = "";
+    const captureUploadOutput = () =>
+      hankweave.process.stdout?.on("data", (chunk) => {
+        uploadOutput += chunk.toString();
+      });
+    captureUploadOutput();
+    const traceUploadCount = () => uploadOutput.split("> Uploading trace:").length - 1;
 
     try {
       await hankweave.waitForEvent("server.ready");
@@ -48,7 +53,7 @@ describe("hw-trace kill/resume lifecycle", () => {
       // Graceful shutdown cleans up the lock file
       expect(hankweave.hasLockFile()).toBeFalse();
 
-      const firstLogs = hankweave.serverLogFile();
+      const firstLogs = hankweave.serverLogFile() + uploadOutput;
       expect(firstLogs).toContain("--- hankweave-trace config ---");
       // SIGTERM goes through shutdown() which calls uploadTrace() before exiting
       expect(firstLogs).toContain("> Uploading trace:");
@@ -65,6 +70,8 @@ describe("hw-trace kill/resume lifecycle", () => {
         logPrefix: "[hw-trace-resume-2]",
       });
 
+      captureUploadOutput();
+
       // Codon-2 was mid-run when interrupted — rollback to codon-1 checkpoint
       const rollback = (await hankweave.waitForEvent(
         "rollback.completed",
@@ -80,7 +87,7 @@ describe("hw-trace kill/resume lifecycle", () => {
       // The resumed run's shutdown uploads a second trace into the same log.
       await waitForCondition(() => traceUploadCount() >= 2, 30_000);
 
-      const secondLogs = hankweave.serverLogFile();
+      const secondLogs = hankweave.serverLogFile() + uploadOutput;
       expect(secondLogs).toContain("--- hankweave-trace config ---");
       expect(secondLogs).toContain("> Uploading trace:");
       expect(secondLogs).toContain("--langfuse");

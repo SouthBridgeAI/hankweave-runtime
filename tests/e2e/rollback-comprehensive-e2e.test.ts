@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { ExecutionLayout } from "../../server/execution-layout.js";
 /**
  * Comprehensive Rollback E2E Test Suite
  *
@@ -20,7 +21,7 @@ import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { LlmProviderRegistry } from "../../server/llm/llm-provider-registry.js";
+import { Models, priceUsage, type UsageTokens } from "../../server/llm/index.js";
 import { CodonId, RunId } from "../../server/types/branded-types.js";
 import {
   type HankweaveState,
@@ -56,13 +57,19 @@ import {
 // -------------
 
 const TEST_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const EXECUTION_DIR = path.join(TEST_ROOT, "tests/test-area/rollback-comprehensive");
+const TEST_TIMESTAMP = generateTestTimestamp();
+// A retry must never reuse files that a failed attempt's server may still write.
+const EXECUTION_DIR = path.join(
+  TEST_ROOT,
+  `tests/test-area/rollback-comprehensive-${TEST_TIMESTAMP}`,
+);
 const DATA_SOURCE_FILE = path.join(TEST_ROOT, "tests/config/poem_guides.txt");
-const SNAPSHOT_DIR = path.join(TEST_ROOT, "tests/test-area/rollback-comprehensive-snapshots");
+const SNAPSHOT_DIR = `${EXECUTION_DIR}-snapshots`;
 const TEST_RESULTS_DIR = path.join(TEST_ROOT, "tests/test-results");
 const CODONS_CONFIG = path.join(TEST_ROOT, "tests/config/test-codons.config.json");
 
-const TEST_TIMESTAMP = generateTestTimestamp();
+// Live model latency can exceed a minute even for these small prompts.
+const CODON_COMPLETION_TIMEOUT_MS = 180_000;
 const TEST_RUN_DIR = path.join(TEST_RESULTS_DIR, `rollback-comprehensive-${TEST_TIMESTAMP}`);
 
 const testDirConfig: TestDirectoryConfig = {
@@ -98,6 +105,7 @@ interface TestState {
   client: TestWSClient | null;
   snapshots: TestSnapshot[];
   executionPath?: string;
+  serverLogStream?: fs.WriteStream;
 }
 
 // -------------
@@ -132,7 +140,7 @@ class EnhancedTestWSClient extends TestWSClient {
 
   async waitForCodonCompletionBySession(
     codonId: string,
-    timeout: number = 120000,
+    timeout: number = CODON_COMPLETION_TIMEOUT_MS,
     afterTimestamp?: string,
   ): Promise<CodonCompletedEvent> {
     const event = await this.waitForEvent(
@@ -287,6 +295,12 @@ function reconstructCodonStatesFromEvents(events: ServerEvent[]): Map<
   return codons;
 }
 
+/** The catalog's price for a codon's usage, or null when the model is unknown or unpriced. */
+function catalogCost(modelId: string, tokens: UsageTokens): number | null {
+  const check = Models.current().check(modelId);
+  return check.ok ? (priceUsage(check.model, tokens)?.cost ?? null) : null;
+}
+
 /**
  * Check if a timestamp is valid ISO 8601
  */
@@ -313,6 +327,46 @@ async function waitForCodonSettled(codonId: string): Promise<void> {
 // -------------
 // SNAPSHOT CREATION
 // -------------
+
+/** Request a new response instead of reusing the first buffered checkpoint list. */
+async function requestCheckpointList(client: TestWSClient): Promise<CheckpointListEvent> {
+  const previousIds = new Set(client.getEventsByType("checkpoint.list").map((event) => event.id));
+  await client.sendCommand({ id: generateId(), type: "checkpoint.list" });
+  return (await client.waitForEvent(
+    "checkpoint.list",
+    5000,
+    (event) => !previousIds.has(event.id),
+  )) as CheckpointListEvent;
+}
+
+/** Runs on setup failure too, before another attempt can start. */
+async function stopScenarioServer(testState: TestState): Promise<void> {
+  const child = testState.serverProcess;
+  try {
+    if (child && child.exitCode === null && child.signalCode === null) {
+      const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
+      // Use the protocol for graceful shutdown on Windows as well as POSIX.
+      const forceKill = setTimeout(() => {
+        if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+      }, 10_000);
+      try {
+        try {
+          if (!testState.client) throw new Error("No connected client");
+          await testState.client.sendCommand({ id: generateId(), type: "server.shutdown" });
+        } catch {
+          child.kill("SIGTERM");
+        }
+        await exited;
+      } finally {
+        clearTimeout(forceKill);
+      }
+    }
+  } finally {
+    await testState.client?.disconnect();
+    const log = testState.serverLogStream;
+    if (log) await new Promise<void>((resolve) => log.end(resolve));
+  }
+}
 
 /**
  * Create a snapshot of the current execution state
@@ -341,15 +395,7 @@ async function createSnapshot(
 
   // Get checkpoint list
   console.log(`${colors.gray}  Requesting checkpoint list...${colors.reset}`);
-  await client.sendCommand({
-    id: generateId(),
-    type: "checkpoint.list",
-  });
-
-  const checkpointEvent = (await client.waitForEvent(
-    "checkpoint.list",
-    5000,
-  )) as CheckpointListEvent;
+  const checkpointEvent = await requestCheckpointList(client);
 
   console.log(
     `${colors.gray}  Found ${checkpointEvent.data.checkpoints.length} checkpoints${colors.reset}`,
@@ -434,6 +480,7 @@ async function executeRollbackScenarios(testState: TestState): Promise<TestSnaps
   // Setup logging
   const serverLogPath = path.join(TEST_RUN_DIR, "server.log");
   const serverLogStream = fs.createWriteStream(serverLogPath, { flags: "a" });
+  testState.serverLogStream = serverLogStream;
 
   // Set up logging streams
   testState.serverProcess.stdout?.on("data", (data) => {
@@ -490,6 +537,9 @@ async function executeRollbackScenarios(testState: TestState): Promise<TestSnaps
   const readyEvent = await testState.client.waitForEvent("server.ready");
   if (readyEvent.type === "server.ready") {
     testState.executionPath = readyEvent.data.executionPath;
+    expect(fs.statSync(new ExecutionLayout(EXECUTION_DIR).runtimeLockPath).isDirectory()).toBe(
+      true,
+    );
     console.log(`${colors.green}✓ Server ready${colors.reset}`);
     console.log(`  Execution path: ${testState.executionPath}`);
   }
@@ -524,7 +574,7 @@ async function executeRollbackScenarios(testState: TestState): Promise<TestSnaps
 
   const codon1Completed = await (
     testState.client as EnhancedTestWSClient
-  ).waitForCodonCompletionBySession("codon-1", 60000, codon1StartTime);
+  ).waitForCodonCompletionBySession("codon-1", CODON_COMPLETION_TIMEOUT_MS, codon1StartTime);
   console.log(
     `${colors.green}✓ Codon 1 completed (cost: $${codon1Completed.data.cost.toFixed(6)})${
       colors.reset
@@ -559,7 +609,7 @@ async function executeRollbackScenarios(testState: TestState): Promise<TestSnaps
 
   const codon2Completed = await (
     testState.client as EnhancedTestWSClient
-  ).waitForCodonCompletionBySession("codon-2", 60000, codon2StartTime);
+  ).waitForCodonCompletionBySession("codon-2", CODON_COMPLETION_TIMEOUT_MS, codon2StartTime);
   console.log(
     `${colors.green}✓ Codon 2 completed (cost: $${codon2Completed.data.cost.toFixed(6)})${
       colors.reset
@@ -642,15 +692,7 @@ async function executeRollbackScenarios(testState: TestState): Promise<TestSnaps
   (testState.client as EnhancedTestWSClient).clearSessionIds();
 
   console.log(`${colors.blue}Listing available checkpoints...${colors.reset}`);
-  await testState.client.sendCommand({
-    id: generateId(),
-    type: "checkpoint.list",
-  });
-
-  const checkpointList1 = (await testState.client.waitForEvent(
-    "checkpoint.list",
-    5000,
-  )) as CheckpointListEvent;
+  const checkpointList1 = await requestCheckpointList(testState.client);
   console.log(
     `${colors.green}✓ Found ${checkpointList1.data.checkpoints.length} checkpoints${colors.reset}`,
   );
@@ -710,7 +752,11 @@ async function executeRollbackScenarios(testState: TestState): Promise<TestSnaps
 
   const codon2Completed2 = await (
     testState.client as EnhancedTestWSClient
-  ).waitForCodonCompletionBySession("codon-2", 60000, codon2Scenario3StartTime);
+  ).waitForCodonCompletionBySession(
+    "codon-2",
+    CODON_COMPLETION_TIMEOUT_MS,
+    codon2Scenario3StartTime,
+  );
   console.log(
     `${colors.green}✓ Codon 2 completed (cost: $${codon2Completed2.data.cost.toFixed(6)})${
       colors.reset
@@ -745,12 +791,18 @@ async function executeRollbackScenarios(testState: TestState): Promise<TestSnaps
 
   const codon3Completed2 = await (
     testState.client as EnhancedTestWSClient
-  ).waitForCodonCompletionBySession("codon-3", 180000, codon3Scenario3StartTime);
+  ).waitForCodonCompletionBySession(
+    "codon-3",
+    CODON_COMPLETION_TIMEOUT_MS,
+    codon3Scenario3StartTime,
+  );
   console.log(
     `${colors.green}✓ Codon 3 completed (cost: $${codon3Completed2.data.cost.toFixed(6)})${
       colors.reset
     }`,
   );
+
+  await waitForCodonSettled("codon-3");
 
   // SNAPSHOT 3
   await createSnapshot(
@@ -769,15 +821,7 @@ async function executeRollbackScenarios(testState: TestState): Promise<TestSnaps
   (testState.client as EnhancedTestWSClient).clearSessionIds();
 
   console.log(`${colors.blue}Getting checkpoint list...${colors.reset}`);
-  await testState.client.sendCommand({
-    id: generateId(),
-    type: "checkpoint.list",
-  });
-
-  const checkpointList2 = (await testState.client.waitForEvent(
-    "checkpoint.list",
-    5000,
-  )) as CheckpointListEvent;
+  const checkpointList2 = await requestCheckpointList(testState.client);
 
   const sortedCheckpoints = [...checkpointList2.data.checkpoints].sort(
     (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
@@ -828,39 +872,6 @@ async function executeRollbackScenarios(testState: TestState): Promise<TestSnaps
     testState,
   );
 
-  // Cleanup
-  console.log(`\n${colors.blue}Cleaning up...${colors.reset}`);
-
-  if (testState.client) {
-    const eventsPath = path.join(TEST_RUN_DIR, "websocket-events.json");
-    await fs.promises.writeFile(eventsPath, JSON.stringify(testState.client.getEvents(), null, 2));
-    console.log(`${colors.gray}  WebSocket events saved to: ${eventsPath}${colors.reset}`);
-  }
-
-  await testState.client.disconnect();
-  console.log(`\n${colors.blue}Gracefully shutting down server...${colors.reset}`);
-
-  if (testState.serverProcess && !testState.serverProcess.killed) {
-    const shutdownPromise = new Promise<void>((resolve) => {
-      testState.serverProcess?.on("exit", (code, signal) => {
-        console.log(
-          `${colors.green}✓ Server process exited with code ${code}, signal ${signal}${colors.reset}`,
-        );
-        resolve();
-      });
-    });
-
-    console.log(`${colors.gray}  Sending SIGTERM to server process...${colors.reset}`);
-    testState.serverProcess.kill("SIGTERM");
-
-    await Promise.race([
-      shutdownPromise,
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("Server shutdown timed out")), 10000),
-      ),
-    ]);
-  }
-
   console.log(`${colors.green}✓ Test execution completed${colors.reset}`);
   console.log(`${colors.green}✓ Created ${testState.snapshots.length} snapshots${colors.reset}`);
 
@@ -882,7 +893,20 @@ describe("Comprehensive Rollback E2E Test", () => {
 
   // Long timeout needed - this runs 4 rollback scenarios with real LLM calls
   beforeAll(async () => {
-    testSnapshots = await executeRollbackScenarios(testState);
+    try {
+      testSnapshots = await executeRollbackScenarios(testState);
+    } finally {
+      try {
+        if (testState.client) {
+          await fs.promises.writeFile(
+            path.join(TEST_RUN_DIR, "websocket-events.json"),
+            JSON.stringify(testState.client.getEvents(), null, 2),
+          );
+        }
+      } finally {
+        await stopScenarioServer(testState);
+      }
+    }
 
     // Load git info for each snapshot for analysis tests
     for (const snapshot of testSnapshots) {
@@ -1146,7 +1170,6 @@ describe("Comprehensive Rollback E2E Test", () => {
     test("2.5 Cost Calculation Validation: Costs are reasonable", () => {
       const snapshot = testSnapshots[2];
       const run = snapshot.state.runs[0];
-      const registry = LlmProviderRegistry.getInstance();
 
       // Load the hank config to get the actual codon models
       const hankConfig = JSON.parse(fs.readFileSync(CODONS_CONFIG, "utf-8"));
@@ -1166,13 +1189,7 @@ describe("Comprehensive Rollback E2E Test", () => {
             continue;
           }
 
-          const expectedCost = registry.calculateCost(modelId, {
-            inputTokens: codon.finalTokens.inputTokens,
-            outputTokens: codon.finalTokens.outputTokens,
-            cacheReadTokens: codon.finalTokens.cacheReadTokens,
-            cacheCreationTokens: codon.finalTokens.cacheCreationTokens,
-          });
-
+          const expectedCost = catalogCost(modelId, codon.finalTokens);
           if (expectedCost === null) {
             // Model pricing not available - skip
             continue;
@@ -1501,16 +1518,16 @@ describe("Comprehensive Rollback E2E Test", () => {
   // ========================================================================
 
   describe("Priority 7: Additional Validation Tests", () => {
-    test("7.1 Resource Cleanup: Lock files removed", async () => {
-      const mainLockFilePath = path.join(EXECUTION_DIR, ".hankweave", "runtime.lock");
+    test("7.1 Resource Cleanup: Lock directories removed", async () => {
+      const mainLockDir = new ExecutionLayout(EXECUTION_DIR).runtimeLockPath;
 
-      // Poll for lock file removal (up to 2 seconds)
+      // Poll for lock directory removal (up to 2 seconds)
       for (let i = 0; i < 20; i++) {
-        if (!fs.existsSync(mainLockFilePath)) break;
+        if (!fs.existsSync(mainLockDir)) break;
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
 
-      expect(fs.existsSync(mainLockFilePath)).toBe(false);
+      expect(fs.existsSync(mainLockDir)).toBe(false);
     });
 
     test("7.2 Storage Growth Patterns: Reasonable file sizes", () => {

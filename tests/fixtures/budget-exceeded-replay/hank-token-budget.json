@@ -5,7 +5,7 @@
       "id": "budget-codon",
       "name": "Budget Test Codon",
       "promptText": "Write a very long detailed essay about the history of computing, covering every decade from the 1940s to the 2020s. Make it at least 5000 words.",
-      "model": "haiku",
+      "model": "anthropic/claude-haiku-4-5",
       "continuationMode": "fresh",
       "budget": {
         "maxOutputTokens": 5
@@ -15,7 +15,7 @@
       "id": "followup-codon",
       "name": "Followup Codon",
       "promptText": "Say exactly: hello world",
-      "model": "haiku",
+      "model": "anthropic/claude-haiku-4-5",
       "continuationMode": "fresh"
     }
   ]

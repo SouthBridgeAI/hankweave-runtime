@@ -14,7 +14,7 @@ import {
   gitEnv as isolatedGitEnv,
   parseNulSeparated,
 } from "../git-support.js";
-import { type Logger, renameWithRetry } from "../utils.js";
+import { type Logger, renameWithRetry, settledAll } from "../utils.js";
 import {
   CheckpointHistoryConflictError,
   CheckpointNotFoundError,
@@ -215,7 +215,7 @@ export class GitWorkspaceStorage implements WorkspaceStorage {
     patterns: readonly string[],
     env: Record<string, string>,
   ): Promise<SnapshotDelta> {
-    const [tracked, untracked, deleted] = await Promise.all([
+    const [tracked, untracked, deleted] = await settledAll([
       this.listCandidates("recorded", env),
       this.listCandidates("unrecorded", env),
       this.listCandidates("missing", env),
@@ -419,7 +419,7 @@ export class GitWorkspaceStorage implements WorkspaceStorage {
       case "missing":
         return this.lsFiles(["--deleted"], env);
       case "visible": {
-        const [candidates, trackedIgnored, deleted] = await Promise.all([
+        const [candidates, trackedIgnored, deleted] = await settledAll([
           this.lsFiles(["--cached", "--others", "--exclude-standard"]),
           this.lsFiles(["--cached", "-i", "--exclude-standard"]),
           this.lsFiles(["--deleted"]),
@@ -833,16 +833,12 @@ ${stanza}`,
    * Why deleting is safe here
    * -------------------------
    * Deleting a lock is only wrong if a live process holds it. Exactly one
-   * Hankweave owns an execution directory at a time: start() runs
-   * assertNoLiveSiblingLock() before checkpoint init, so any lock found on
-   * the reuse path was left by a process that is dead, or that is alive but
-   * whose heartbeat lapsed more than two minutes ago. The lock protocol
-   * treats the second case as crashed (the full lock check unlinks the
-   * runtime lock and the predecessor fences itself on its next heartbeat
-   * tick), so this matches the rest of the system; the residual window is a
-   * predecessor stalled mid-git-command for two minutes, which the protocol
-   * already accepts. That is why this is called only from initialize(),
-   * after that check, and never during a run.
+   * Hankweave command owns an execution directory at a time: it acquires
+   * the execution lease before checkpoint initialization. A predecessor
+   * whose heartbeat expires is treated as crashed and exits when it detects
+   * lease loss. As with lease recovery generally, a stalled predecessor can
+   * briefly overlap takeover until that detection. This cleanup only runs
+   * during initialize(), after command acquisition, never during a run.
    *
    * What other systems do (for the record)
    * --------------------------------------

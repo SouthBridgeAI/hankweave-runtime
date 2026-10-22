@@ -12,7 +12,7 @@
     {
       "id": "codon-1",
       "name": "First codon",
-      "model": "sonnet",
+      "model": "anthropic/claude-sonnet-4-6",
       "continuationMode": "fresh",
       "promptFile": "prompts/codon1.md",
       "rigSetup": [
@@ -64,7 +64,7 @@
         {
           "id": "codon-2",
           "name": "Second codon",
-          "model": "sonnet",
+          "model": "anthropic/claude-sonnet-4-6",
           "continuationMode": "continue-previous",
           "promptFile": "prompts/codon2.md",
           "appendSystemPromptFile": "prompts/append-system.md"

@@ -165,7 +165,7 @@ export function buildMessyHank(): MessyHank {
       {
         id: "__proto__",
         name: "Prototype-polluting codon",
-        model: "sonnet",
+        model: "anthropic/claude-sonnet-4-5",
         continuationMode: "fresh",
         promptFile: ["prompts/main.md", "..templates/intro.md"],
         appendSystemPromptFile: "prompts/append.md",
@@ -199,7 +199,7 @@ export function buildMessyHank(): MessyHank {
           {
             id: "deep",
             name: "Deep codon",
-            model: "sonnet",
+            model: "anthropic/claude-sonnet-4-5",
             continuationMode: "continue-previous",
             promptFile: ["prompts/深い.md", "__proto__/tricky.md"],
           },

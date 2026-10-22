@@ -78,7 +78,7 @@ describe("Sentinel Fatal Error Handling", () => {
       const config: SentinelConfig = {
         id: "bad-conversational",
         name: "Bad Conversational",
-        model: "sonnet",
+        model: "anthropic/claude-sonnet-4-6",
         trigger: { type: "event", on: ["assistant.action"] },
         execution: { strategy: "immediate" },
         userPromptText: "Test",
@@ -117,7 +117,7 @@ describe("Sentinel Fatal Error Handling", () => {
       const config: SentinelConfig = {
         id: "template-error-sentinel",
         name: "Template Error Sentinel",
-        model: "sonnet",
+        model: "anthropic/claude-sonnet-4-6",
         trigger: { type: "event", on: ["assistant.action"] },
         execution: { strategy: "immediate" },
         userPromptText: "Test prompt",
@@ -165,7 +165,7 @@ describe("Sentinel Fatal Error Handling", () => {
       const configContinue: SentinelConfig = {
         id: "continue-on-error",
         name: "Continue On Error",
-        model: "sonnet",
+        model: "anthropic/claude-sonnet-4-6",
         trigger: { type: "event", on: ["assistant.action"] },
         execution: { strategy: "immediate" },
         systemPromptText: "System prompt",
@@ -214,7 +214,7 @@ describe("Sentinel Fatal Error Handling", () => {
       const configNoContinue: SentinelConfig = {
         id: "no-continue-on-error",
         name: "No Continue On Error",
-        model: "sonnet",
+        model: "anthropic/claude-sonnet-4-6",
         trigger: { type: "event", on: ["assistant.action"] },
         execution: { strategy: "immediate" },
         systemPromptText: "System prompt",
@@ -262,7 +262,7 @@ describe("Sentinel Fatal Error Handling", () => {
       const config: SentinelConfig = {
         id: "failing-sentinel",
         name: "Failing Sentinel",
-        model: "sonnet",
+        model: "anthropic/claude-sonnet-4-6",
         trigger: { type: "event", on: ["assistant.action"] },
         execution: { strategy: "immediate" },
         userPromptText: "Test prompt",
@@ -322,7 +322,7 @@ describe("Sentinel Fatal Error Handling", () => {
       const config: SentinelConfig = {
         id: "intermittent-sentinel",
         name: "Intermittent Sentinel",
-        model: "sonnet",
+        model: "anthropic/claude-sonnet-4-6",
         trigger: { type: "event", on: ["assistant.action"] },
         execution: { strategy: "immediate" },
         userPromptText: "Test prompt",
@@ -371,7 +371,7 @@ describe("Sentinel Fatal Error Handling", () => {
       const config: SentinelConfig = {
         id: "resource-error-sentinel",
         name: "Resource Error Sentinel",
-        model: "sonnet",
+        model: "anthropic/claude-sonnet-4-6",
         trigger: { type: "event", on: ["assistant.action"] },
         execution: { strategy: "immediate" },
         userPromptText: "Test prompt",
@@ -428,7 +428,7 @@ describe("Sentinel Fatal Error Handling", () => {
         const config: SentinelConfig = {
           id: `${testCase.errorType}-test`,
           name: `${testCase.errorType} Test`,
-          model: "sonnet",
+          model: "anthropic/claude-sonnet-4-6",
           trigger: { type: "event", on: ["assistant.action"] },
           execution: { strategy: "immediate" },
           userPromptText: "Test prompt",
@@ -478,7 +478,7 @@ describe("Sentinel Fatal Error Handling", () => {
       const config: SentinelConfig = {
         id: "explicit-unload",
         name: "Explicit Unload",
-        model: "sonnet",
+        model: "anthropic/claude-sonnet-4-6",
         trigger: { type: "event", on: ["assistant.action"] },
         execution: { strategy: "immediate" },
         userPromptText: "Test prompt",
@@ -535,7 +535,7 @@ describe("Sentinel Fatal Error Handling", () => {
         {
           id: "success-sentinel",
           name: "Success Sentinel",
-          model: "sonnet",
+          model: "anthropic/claude-sonnet-4-6",
           trigger: { type: "event", on: ["assistant.action"] },
           execution: { strategy: "immediate" },
           userPromptText: "Success",
@@ -543,7 +543,7 @@ describe("Sentinel Fatal Error Handling", () => {
         {
           id: "template-error",
           name: "Template Error",
-          model: "sonnet",
+          model: "anthropic/claude-sonnet-4-6",
           trigger: { type: "event", on: ["assistant.action"] },
           execution: { strategy: "immediate" },
           userPromptText: "Template Error",
@@ -551,7 +551,7 @@ describe("Sentinel Fatal Error Handling", () => {
         {
           id: "resource-error",
           name: "Resource Error",
-          model: "sonnet",
+          model: "anthropic/claude-sonnet-4-6",
           trigger: { type: "event", on: ["assistant.action"] },
           execution: { strategy: "immediate" },
           userPromptText: "Resource Error",

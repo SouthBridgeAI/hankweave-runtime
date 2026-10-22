@@ -253,7 +253,7 @@ Files. One codon writes to the filesystem, the next reads from it. There's no im
 
 It depends on the hank and the models you choose. A complex planning hank might cost $10-15 per run on frontier models. Simpler hanks can cost pennies.
 
-The key insight is that as hanks mature, you can move to faster and cheaper models. Early iteration needs the best model you can get; once the prompts, rigs, and sentinels are dialed in, the structure does the heavy lifting and cheaper models perform well. Try running any hank with `-m haiku` to quickly prototype, or use `--max-cost 0.50 -m haiku` for a budget-capped pilot run.
+The key insight is that as hanks mature, you can move to faster and cheaper models. Early iteration needs the best model you can get; once the prompts, rigs, and sentinels are dialed in, the structure does the heavy lifting and cheaper models perform well. Try running any hank with `-m anthropic/claude-haiku-4-5` to quickly prototype, or use `--max-cost 0.50 -m anthropic/claude-haiku-4-5` for a budget-capped pilot run.
 
 Hankweave includes per-codon [cost and token tracking](https://hankweave.southbridge.ai/reference/performance/) and a [budget system](https://hankweave.southbridge.ai/concepts/budgets/) that lets authors allocate budgets across codons and loops, and operators cap runs with `--max-cost` and `--max-time`.
 
@@ -267,6 +267,25 @@ Five agent harnesses ship with Hankweave: **Claude Code** (via the Agents SDK, i
 </details>
 
 <details>
+<summary><strong>Can I use a model released after my Hankweave version?</strong></summary>
+
+Yes, without upgrading. A model is accepted once the harness that will run it confirms it can: Pi checks its own catalog (refreshed from pi.dev when it lacks the model), and the Claude Code harness checks hankweave's catalog, asking Anthropic's model list with your API key for an id the catalog lacks. Only then does hankweave price the model, from a catalog it keeps current at runtime: the models.dev data bundled with your version, a cached copy of the live models.dev catalog, LiteLLM prices, a small reviewed file of corrections that ships with each release, and, for a model none of those lists, Pi's own row. `hankweave --validate` prints what confirmed each model, where its record came from, and how its price is known.
+
+If no source knows the model yet, or you pay different rates, declare it in a `models` block in `hank.json` or `hankweave.json`. A declared `cost` is what budgets use and what the run records, even for a model the harness prices itself:
+
+```json
+"models": [
+  { "id": "anthropic/claude-sonnet-6", "basedOn": "anthropic/claude-sonnet-5-5", "cost": { "input": 3, "output": 15 } }
+]
+```
+
+For a model the catalog already knows, an entry can give just the `cost` you pay (`{ "id": "anthropic/claude-sonnet-5-5", "cost": { "input": 2.5, "output": 12 } }`). An entry must name a provider the catalog lists: declare a model you reach through `openai-codex` as `openai/…`. A declared model Pi's catalog lacks is added to Pi's catalog for the run, with request settings copied from its newest sibling.
+
+Names must match exactly: every model is `<provider>/<model>`, case-sensitive, with no shortcuts (`sonnet`, `opus`, `gpt-5.6` are gone) and no provider inferred. A wrong name fails with the rule and ids to copy instead of quietly running a similar model; `pi/<provider>/<model>` forces the Pi harness, and `openrouter/<org>/<model>` runs through OpenRouter on Pi. A model with no known price counts against dollar budgets at a flagged ceiling estimate; set `"budget": { "unpricedModels": "refuse" }` in `hankweave.json` to fail validation instead.
+
+</details>
+
+<details>
 <summary><strong>What parts of a hank are reusable?</strong></summary>
 
 Codons are reusable across hanks. If you build a codon that handles LaTeX report generation well, you can import it into any hank that needs reports. Edge cases you fix in one hank travel to every hank that reuses that codon.
@@ -276,7 +295,7 @@ Codons are reusable across hanks. If you build a codon that handles LaTeX report
 <details>
 <summary><strong>Can I run this locally or air-gapped?</strong></summary>
 
-Yes - this is one of Hankweave's big advantages. Because all computation happens through the harnesses you configure, you can run on open-source models entirely. And because hank execution is designed to be atomic, you can spin up a GPU instance, run your hank, and spin it back down. No always-on infrastructure required.
+Yes - this is one of Hankweave's big advantages. Because all computation happens through the harnesses you configure, you can run on open-source models entirely. And because hank execution is designed to be atomic, you can spin up a GPU instance, run your hank, and spin it back down. No always-on infrastructure required. Set `"noOnlineModelChecks": true` in `hankweave.json` (or `HANKWEAVE_RUNTIME_NO_ONLINE_MODEL_CHECKS=1`) to stop Hankweave looking models up online (models.dev, LiteLLM's price list on `raw.githubusercontent.com`, pi.dev, providers' model lists); it then uses the model data bundled with your version plus whatever it has cached. Calls to the models themselves are unaffected.
 
 </details>
 

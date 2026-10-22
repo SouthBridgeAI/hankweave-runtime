@@ -199,7 +199,7 @@ export class BasicTUI {
       }
 
       console.log(`${COLORS.dim}${SYMBOLS.pipe} Disconnected from server${COLORS.reset}`);
-      // Server shutdown will handle process exit
+      // The runtime command handles process exit after shutdown
     };
   }
 
@@ -331,12 +331,7 @@ export class BasicTUI {
         `All ${this.codonsCompleted} codon${this.codonsCompleted === 1 ? "" : "s"} completed successfully in ${elapsed}.`,
       );
       lines.push("");
-      if (this.showCosts) {
-        lines.push(`Total cost:  ${COLORS.yellow}$${this.totalCost.toFixed(4)}${COLORS.reset}`);
-      }
-      if (this.agentRootPath) {
-        lines.push(`Workspace:   ${this.agentRootPath}`);
-      }
+      this.appendShutdownDetails(lines, true);
 
       // Output path — always show where to look
       lines.push("");
@@ -368,12 +363,7 @@ export class BasicTUI {
       lines.push(
         `Completed:   ${this.codonsCompleted} of ${totalCodons} codon${totalCodons === 1 ? "" : "s"}`,
       );
-      if (this.showCosts) {
-        lines.push(`Cost so far: ${COLORS.yellow}$${this.totalCost.toFixed(4)}${COLORS.reset}`);
-      }
-      if (this.agentRootPath) {
-        lines.push(`Workspace:   ${this.agentRootPath}`);
-      }
+      this.appendShutdownDetails(lines, false);
       if (this.executionPath) {
         lines.push("");
         lines.push(
@@ -385,12 +375,7 @@ export class BasicTUI {
       lines.push(
         `Stopped by user after ${this.codonsCompleted} of ${totalCodons} codon${totalCodons === 1 ? "" : "s"} (${elapsed} elapsed).`,
       );
-      if (this.showCosts) {
-        lines.push(`Cost so far: ${COLORS.yellow}$${this.totalCost.toFixed(4)}${COLORS.reset}`);
-      }
-      if (this.agentRootPath) {
-        lines.push(`Workspace:   ${this.agentRootPath}`);
-      }
+      this.appendShutdownDetails(lines, false);
       if (this.executionPath) {
         lines.push("");
         lines.push(
@@ -413,6 +398,16 @@ export class BasicTUI {
 
     console.log(""); // blank line before summary
     this.drawBox(titleMap[outcome], lines, colorMap[outcome]);
+  }
+
+  private appendShutdownDetails(lines: string[], completed: boolean): void {
+    if (this.showCosts) {
+      const label = completed ? "Total cost: " : "Cost so far:";
+      lines.push(`${label} ${COLORS.yellow}$${this.totalCost.toFixed(4)}${COLORS.reset}`);
+    }
+    if (this.agentRootPath) {
+      lines.push(`Workspace:   ${this.agentRootPath}`);
+    }
   }
 
   /**

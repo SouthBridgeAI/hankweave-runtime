@@ -29,7 +29,7 @@ export interface ReplayCodonSpec {
   onFailure?: "abort" | "retry" | "ignore";
   /** Only meaningful with onFailure:"retry". */
   retryConfig?: { maxAttempts: number; delayMs?: number };
-  /** Model alias written to hank.json (default "haiku" → ClaudeAgentSDKManager). */
+  /** Model written to hank.json (default "anthropic/claude-haiku-4-5" → ClaudeAgentSDKManager). */
   model?: string;
   /**
    * The JSONL log lines replayed for this codon, in order. A system `init` line
@@ -286,7 +286,7 @@ export function buildReplayFixture(opts: {
       id: c.id,
       name: c.name ?? c.id,
       promptText: `Replay fixture codon ${c.id}`,
-      model: c.model ?? "haiku",
+      model: c.model ?? "anthropic/claude-haiku-4-5",
       continuationMode: "fresh",
       ...(c.onFailure ? { onFailure: c.onFailure } : {}),
       ...(c.retryConfig ? { retryConfig: c.retryConfig } : {}),

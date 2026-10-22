@@ -76,7 +76,7 @@ describe("StateManager codon preparation", () => {
     const codon = createTestCodon({
       id,
       name: "Prepare",
-      model: "sonnet",
+      model: "anthropic/claude-sonnet-4-6",
       continuationMode: "fresh",
       promptText: "test",
       checkpointedFiles: ["**/*"],

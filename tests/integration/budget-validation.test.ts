@@ -24,14 +24,14 @@ const BASE_CODONS = [
     id: "a",
     name: "Codon A",
     promptText: "Say hello",
-    model: "haiku",
+    model: "anthropic/claude-haiku-4-5",
     continuationMode: "fresh",
   },
   {
     id: "b",
     name: "Codon B",
     promptText: "Say goodbye",
-    model: "haiku",
+    model: "anthropic/claude-haiku-4-5",
     continuationMode: "fresh",
   },
 ];
@@ -64,6 +64,10 @@ async function expectValidationError(
       port,
       logPrefix: "[budget-validation]",
       extraArgs: ["--force"],
+      // The model pre-pass checks credentials before the hank is parsed; a
+      // placeholder key lets it confirm the model from the catalog so the
+      // budget error under test is the one reported. Nothing reaches the API.
+      env: { ANTHROPIC_API_KEY: "test-anthropic-key" },
     });
     throw new Error("Expected launchHankweave to throw ServerLaunchError, but it succeeded");
   } catch (err) {

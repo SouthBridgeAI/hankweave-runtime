@@ -199,7 +199,7 @@ describe("Wildcard Event Trigger Tests", () => {
       const config: SentinelConfig = {
         id: "wildcard-any-event",
         name: "Wildcard Any Event",
-        model: "sonnet",
+        model: "anthropic/claude-sonnet-4-6",
         trigger: {
           type: "event",
           on: ["*"],
@@ -246,7 +246,7 @@ describe("Wildcard Event Trigger Tests", () => {
       const config: SentinelConfig = {
         id: "wildcard-count",
         name: "Wildcard Count",
-        model: "sonnet",
+        model: "anthropic/claude-sonnet-4-6",
         trigger: {
           type: "event",
           on: ["*"],
@@ -290,7 +290,7 @@ describe("Wildcard Event Trigger Tests", () => {
       const config: SentinelConfig = {
         id: "wildcard-debounce",
         name: "Wildcard Debounce",
-        model: "sonnet",
+        model: "anthropic/claude-sonnet-4-6",
         trigger: {
           type: "event",
           on: ["*"],
@@ -337,7 +337,7 @@ describe("Wildcard Event Trigger Tests", () => {
       const config: SentinelConfig = {
         id: "wildcard-sequence",
         name: "Wildcard Sequence",
-        model: "sonnet",
+        model: "anthropic/claude-sonnet-4-6",
         trigger: {
           type: "sequence",
           interestFilter: { on: ["*"] },
@@ -376,7 +376,7 @@ describe("Wildcard Event Trigger Tests", () => {
       const config: SentinelConfig = {
         id: "complex-wildcard",
         name: "Complex Wildcard",
-        model: "sonnet",
+        model: "anthropic/claude-sonnet-4-6",
         trigger: {
           type: "sequence",
           interestFilter: { on: ["*"] },
@@ -422,7 +422,7 @@ describe("Wildcard Event Trigger Tests", () => {
       const config: SentinelConfig = {
         id: "non-consecutive-wildcard",
         name: "Non-consecutive Wildcard",
-        model: "sonnet",
+        model: "anthropic/claude-sonnet-4-6",
         trigger: {
           type: "sequence",
           interestFilter: { on: ["*"] },
@@ -465,7 +465,7 @@ describe("Wildcard Event Trigger Tests", () => {
       const config: SentinelConfig = {
         id: "wildcard-with-conditions",
         name: "Wildcard with Conditions",
-        model: "sonnet",
+        model: "anthropic/claude-sonnet-4-6",
         trigger: {
           type: "event",
           on: ["*"],
@@ -522,7 +522,7 @@ describe("Wildcard Event Trigger Tests", () => {
       const config: SentinelConfig = {
         id: "mixed-wildcard",
         name: "Mixed Wildcard",
-        model: "sonnet",
+        model: "anthropic/claude-sonnet-4-6",
         trigger: {
           type: "event",
           on: ["assistant.action", "*", "tool.result"],
@@ -568,7 +568,7 @@ describe("Wildcard Event Trigger Tests", () => {
       const config: SentinelConfig = {
         id: "wildcard-interest",
         name: "Wildcard Interest Filter",
-        model: "sonnet",
+        model: "anthropic/claude-sonnet-4-6",
         trigger: {
           type: "sequence",
           interestFilter: { on: ["*"] },
@@ -608,7 +608,7 @@ describe("Wildcard Event Trigger Tests", () => {
       const config: SentinelConfig = {
         id: "high-freq-wildcard",
         name: "High Frequency Wildcard",
-        model: "sonnet",
+        model: "anthropic/claude-sonnet-4-6",
         trigger: {
           type: "event",
           on: ["*"],

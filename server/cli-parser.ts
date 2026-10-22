@@ -123,7 +123,7 @@ Configuration:
   --config <path>           Path to hank.json (alternative to positional arg)
   --data <path>             Path to data source (default: config directory)
   -i, --input <text>        Use inline text as data input (highest priority)
-  -m, --model <model>       Model override (sonnet|opus|gemini-flash|etc)
+  -m, --model <model>       Model override for every codon, as <provider>/<model>
 
 Server:
   -p, --port <port>         WebSocket server port (default: auto-select free port)
@@ -160,7 +160,7 @@ Examples:
   hankweave ./my-project -n           Start fresh execution (--new)
   hankweave -e ./my-exec              Use specific execution directory
   hankweave -o ./results              Copy outputs to ./results
-  hankweave -m opus -p 8080           Use opus model on port 8080
+  hankweave -m anthropic/claude-opus-5-5 -p 8080   Use Opus 5.5 on port 8080
 
 Outputs are stored in the agent workspace (~/.hankweave-executions/{id}/agentRoot) by default.
 Use --output to copy them elsewhere.
@@ -334,7 +334,7 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
   // Parse model (-m, --model)
   const modelArg = getFlagValue(args, "--model") || getFlagValue(args, "-m");
   if (modelArg) {
-    result.model = modelArg as "sonnet" | "opus";
+    result.model = modelArg;
   }
 
   // Parse anthropicBaseUrl

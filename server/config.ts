@@ -2,21 +2,17 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { z } from "zod";
-import { validateModel } from "./config-validation/model-validator.js";
 import {
   codonSentinelEntrySchema,
   sentinelConfigSchema,
 } from "./config-validation/sentinel.schema.js";
-import { ExecutionLayout } from "./execution-layout.js";
 import { describeIgnoredEntries, HankConfigFile, HankDir, type HankRef } from "./hank-dir.js";
 import { hankweaveEnvEntries } from "./hankweave-env.js";
-import { LlmProviderRegistry } from "./llm/llm-provider-registry.js";
-import type { ModelInfo } from "./llm/models-dev-schema.js";
-import { selectHarness } from "./provider-ids.js";
+import { type ModelInfo, Models, modelsBlockSchema, type PriceStatus } from "./llm/index.js";
 import { type TelemetryConfig, telemetryConfigSchema } from "./telemetry/telemetry-types.js";
 import { CodonId } from "./types/branded-types.js";
 import type { AllocationMode, OnExceededPolicy } from "./types/budget-types.js";
-import type { ModelName, SelfTestFailureCategory, ShimSelfTestResult } from "./types/types.js";
+import type { ModelName, ShimSelfTestResult } from "./types/types.js";
 import {
   checkRegularFile,
   codonOwnRefs,
@@ -28,7 +24,6 @@ import {
   refFieldSchema,
   refStringSchema,
   refViolationMessage,
-  rmSyncWithRetry,
   sentinelOwnRefs,
   toPosix,
 } from "./utils.js";
@@ -57,21 +52,6 @@ export const TIMEOUTS = {
 /** Maximum allowed shimIdleTimeout in seconds */
 export const SHIM_IDLE_TIMEOUT_MAX_SECONDS = 1800;
 const SHIM_IDLE_TIMEOUT_MAX_MINUTES = SHIM_IDLE_TIMEOUT_MAX_SECONDS / 60;
-
-/**
- * Platform-specific retry configuration for directory cleanup.
- * Windows requires more retries and longer delays due to file locking after process termination.
- */
-export const CLEANUP_RETRY_CONFIG = {
-  windows: {
-    maxRetries: 10, // More retries for Windows file locking issues
-    initialDelay: 50, // Start with 50ms, doubles each retry (exponential backoff)
-  },
-  default: {
-    maxRetries: 5, // Standard retries for Unix-like systems
-    initialDelay: 10, // Start with 10ms
-  },
-} as const;
 
 /**
  * Common typos/mistakes mapped to correct field names.
@@ -346,14 +326,13 @@ export const loopTerminationSchema = z.discriminatedUnion("type", [
 // -------------
 
 /**
- * Reusable model validation refinement.
- * Returns true if model is valid or undefined, false otherwise.
+ * Reusable model validation refinement: a codon model spelling the model
+ * pre-pass confirmed (spec 72; Models.load ran stages 0–3 before any config
+ * was parsed). Returns true if model is valid or undefined.
  */
 function modelValidationRefinement(model: string | undefined): boolean {
   if (!model) return true;
-  const registry = LlmProviderRegistry.getInstance();
-  const result = validateModel(model, registry);
-  return result.valid;
+  return Models.current().check(model, "codon").ok;
 }
 
 /**
@@ -361,11 +340,10 @@ function modelValidationRefinement(model: string | undefined): boolean {
  * Used in Zod refinements to provide consistent error messages.
  */
 function modelValidationError(model: string | undefined) {
-  const registry = LlmProviderRegistry.getInstance();
   if (!model) throw new Error("Unreachable");
-  const result = validateModel(model, registry);
+  const result = Models.current().check(model, "codon");
   return {
-    message: `Invalid model '${model}': ${result.reason}`,
+    message: `Invalid model '${model}': ${result.ok ? "" : result.message}`,
     path: ["model"],
   };
 }
@@ -455,22 +433,62 @@ const BUDGET_SHARES_SUM_MSG =
 // Budget Preflight Warnings
 // -------------
 
+type HankBudgetInput =
+  | {
+      maxDollars?: number;
+      maxTimeSeconds?: number;
+      allocation?: AllocationMode;
+      shares?: Record<string, number>;
+      onExceeded?: OnExceededPolicy;
+    }
+  | undefined;
+
+/**
+ * A model's price status for budgets: the catalog's verdict when the record
+ * carries provenance, else derived from the listed cost (records built
+ * without the catalog, e.g. in tests).
+ */
+function budgetPriceStatus(model: ModelInfo): PriceStatus {
+  if (model.provenance) return model.provenance.priceStatus;
+  const cost = model.cost;
+  if (!cost || (cost.input === undefined && cost.output === undefined)) return "unknown";
+  return (cost.input ?? 0) === 0 && (cost.output ?? 0) === 0 ? "zero" : "known";
+}
+
+/**
+ * Every codon (loop children included) that any dollar budget applies to:
+ * its own, its loop's, the hank's, or the run-wide ceiling from the runtime
+ * config or CLI.
+ */
+function codonsUnderDollarBudget(
+  hankBudget: HankBudgetInput,
+  codons: CodonConfig[],
+  options: { ceilingMaxDollars?: number } = {},
+): Codon[] {
+  const global = hankBudget?.maxDollars !== undefined || options.ceilingMaxDollars !== undefined;
+  return codons.flatMap((config) =>
+    config.type === "loop"
+      ? config.codons.filter(
+          (codon) =>
+            global ||
+            config.budget?.maxDollars !== undefined ||
+            codon.budget?.maxDollars !== undefined,
+        )
+      : global || config.budget?.maxDollars !== undefined
+        ? [config]
+        : [],
+  );
+}
+
 /**
  * Compute non-blocking budget warnings for valid-but-suspicious configurations.
  * These warn about things like codon caps that can never be reached, loop budgets
  * that exceed their allocation, and unallocated budget fractions.
  */
 export function computeBudgetWarnings(
-  hankBudget:
-    | {
-        maxDollars?: number;
-        maxTimeSeconds?: number;
-        allocation?: AllocationMode;
-        shares?: Record<string, number>;
-        onExceeded?: OnExceededPolicy;
-      }
-    | undefined,
+  hankBudget: HankBudgetInput,
   codons: CodonConfig[],
+  options: { ceilingMaxDollars?: number } = {},
 ): string[] {
   const warnings: string[] = [];
 
@@ -587,28 +605,30 @@ export function computeBudgetWarnings(
     }
   }
 
-  // W6: Dollar budget set but model lacks pricing data
-  const hasDollarBudget = hankBudget?.maxDollars !== undefined;
-  for (const config of codons) {
-    if (config.type === "loop") {
-      for (const codon of config.codons) {
-        const codonHasDollars =
-          hasDollarBudget ||
-          config.budget?.maxDollars !== undefined ||
-          codon.budget?.maxDollars !== undefined;
-        if (codonHasDollars && (!codon.model.cost || codon.model.cost.input === undefined)) {
-          warnings.push(
-            `Budget: '${codon.id}' is subject to a dollar budget but model '${codon.model.name}' has no pricing data. Cost tracking may be inaccurate.`,
-          );
-        }
-      }
-    } else {
-      const codonHasDollars = hasDollarBudget || config.budget?.maxDollars !== undefined;
-      if (codonHasDollars && (!config.model.cost || config.model.cost.input === undefined)) {
-        warnings.push(
-          `Budget: '${config.id}' is subject to a dollar budget but model '${config.model.name}' has no pricing data. Cost tracking may be inaccurate.`,
-        );
-      }
+  // W6: A dollar budget over a model whose price is unknown or listed as $0.
+  // Under the default unpricedModels policy an unknown price is counted at the
+  // catalog's flagged ceiling estimate; without an estimate it counts as $0.
+  for (const codon of codonsUnderDollarBudget(hankBudget, codons, options)) {
+    const model = codon.model;
+    const status = budgetPriceStatus(model);
+    const budgetCost = model.provenance?.budgetCost;
+    if (status === "unknown") {
+      warnings.push(
+        budgetCost
+          ? `Budget: '${codon.id}' is subject to a dollar budget but no catalog source prices ` +
+              `model '${model.providerId}/${model.modelId}'; its tokens count at a ceiling ` +
+              `estimate of $${budgetCost.input}/$${budgetCost.output} per M ` +
+              `(${model.provenance?.budgetCostBasis ?? "estimate"}).`
+          : `Budget: '${codon.id}' is subject to a dollar budget but model ` +
+              `'${model.providerId}/${model.modelId}' has no pricing data and no estimate; ` +
+              "its cost counts as $0. Declare its price in a 'models' block.",
+      );
+    } else if (status === "zero") {
+      warnings.push(
+        `Budget: '${codon.id}' is subject to a dollar budget but model ` +
+          `'${model.providerId}/${model.modelId}' is listed at $0 per token, so the budget ` +
+          "cannot bind on it. If it is not free, declare its price in a 'models' block.",
+      );
     }
   }
 
@@ -741,7 +761,7 @@ export const codonObjectSchema = z.object({
     .string()
     .min(1, "Model cannot be empty")
     .describe(
-      "Model to use for this codon. Can be a Claude model ('sonnet', 'opus'), Gemini model ('gemini-2.0-flash-exp', 'flash'), or any other model supported by the configured shim.",
+      "Model for this codon, as '<provider>/<model>' exactly as the harness that runs it knows it ('anthropic/claude-sonnet-5-5', 'openai-codex/gpt-5.6-sol', 'openrouter/moonshotai/kimi-k3'), or 'pi/<provider>/<model>' to run it through Pi. Case-sensitive; no shortcuts. A model is accepted once its harness confirms it can run it; anything else fails validation with ids to use instead.",
     ),
   continuationMode: z
     .enum(["fresh", "continue-previous"], {
@@ -945,13 +965,12 @@ export const codonSchema = codonObjectSchema
     },
   )
   .transform((codon, ctx) => {
-    const registry = LlmProviderRegistry.getInstance();
-    const result = validateModel(codon.model, registry);
+    const result = Models.current().check(codon.model, "codon");
 
-    if (!result.valid) {
+    if (!result.ok) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: `Invalid model '${codon.model}': ${result.reason}`,
+        message: `Invalid model '${codon.model}': ${result.message}`,
         path: ["model"],
       });
       return z.NEVER;
@@ -961,7 +980,7 @@ export const codonSchema = codonObjectSchema
     // This transformation is specific to codons - config schemas keep model as string
     return {
       ...codon,
-      model: result.modelInfo,
+      model: result.model,
     };
   });
 
@@ -1279,7 +1298,7 @@ export const hankOverridesSchema = z
       .string()
       .optional()
       .describe(
-        "Override model for this hank (e.g., 'sonnet' for Claude, 'flash' for Gemini, 'This task needs high reasoning')",
+        "Model for every codon in this hank, replacing each codon's own model. Written like a codon's model: '<provider>/<model>', e.g. 'anthropic/claude-opus-5-5'.",
       ),
     dataHashTimeLimit: z
       .number()
@@ -1385,6 +1404,12 @@ const sharedHankRootFields = {
     .string()
     .optional()
     .describe("Global system prompt text applied to all codons"),
+  models: modelsBlockSchema
+    .optional()
+    .describe(
+      "Model records this hank adds to the model catalog: models newer than every catalog " +
+        "source, or corrected prices and limits (hankweave.json `models` entries win over these).",
+    ),
 };
 
 export const hankFileSchema = z
@@ -1514,7 +1539,7 @@ export const runtimeConfigSchema = z
       .min(1)
       .optional()
       .describe(
-        "User's preferred default model. Can be a short name like 'sonnet' or 'opus', a Gemini model like 'gemini-2.0-flash', or any model supported by the configured providers. Validation happens at runtime via LLMRegistry.",
+        "Model for every codon, replacing each codon's own model. Written like a codon's model: '<provider>/<model>', e.g. 'anthropic/claude-sonnet-5-5'. Checked with its harness at startup.",
       ),
     anthropicBaseUrl: z
       .string()
@@ -1606,9 +1631,34 @@ export const runtimeConfigSchema = z
           .positive()
           .optional()
           .describe("Global wall-clock time limit in seconds. Effective = min(runtime, hank)."),
+        unpricedModels: z
+          .enum(["estimate", "refuse"])
+          .optional()
+          .describe(
+            "What a dollar budget does with a model whose price no catalog source knows. " +
+              "'estimate' (default) counts its tokens at a flagged ceiling estimate (the highest " +
+              "price among the model's siblings); 'refuse' fails validation instead.",
+          ),
       })
       .strict()
       .optional(),
+
+    // Model catalog
+    noOnlineModelChecks: z
+      .boolean()
+      .optional()
+      .describe(
+        "Stop Hankweave looking models up online (models.dev, LiteLLM prices, the model " +
+          "overlay, pi.dev, providers' model lists); the catalog then uses the model data " +
+          "bundled with this version plus its cache. Calls to the models themselves are " +
+          "unaffected. Env: HANKWEAVE_RUNTIME_NO_ONLINE_MODEL_CHECKS.",
+      ),
+    models: modelsBlockSchema
+      .optional()
+      .describe(
+        "Model records added to the model catalog for every run from this directory: new " +
+          "models, or the deployment's real prices and limits. Merged over hank.json `models`.",
+      ),
   })
   .strict()
   .refine(
@@ -1658,6 +1708,7 @@ export interface HankweaveConfig
     | "telemetry"
     | "shimIdleTimeout"
     | "budget"
+    | "models"
   > {
   // Fields from RuntimeConfig that remain optional
   /** Optional custom base URL for Anthropic API (e.g., for proxies or gateways) */
@@ -1699,14 +1750,13 @@ export interface HankweaveConfig
     allocation?: AllocationMode;
     shares?: Record<string, number>;
     onExceeded?: OnExceededPolicy;
+    /** hankweave.json only: what dollar budgets do with an unpriced model. */
+    unpricedModels?: "estimate" | "refuse";
   };
 
   // Additional internal properties (not in RuntimeConfig)
   /** Server version for client compatibility checks */
   version: string;
-
-  /** Path to lock file preventing multiple server instances */
-  lockFile: string;
 
   /** Path to WebSocket traffic log file */
   socketLogFile: string;
@@ -1795,7 +1845,6 @@ export const DEFAULT_CONFIG: Omit<
   // Informational only — nothing consumes this field. The actual root is resolved
   // at call time by getManagedExecutionsRoot() in utils.ts (env var HANKWEAVE_RUNTIME_EXECUTION_BASE_DIR).
   executionBaseDir: path.join(os.homedir(), ".hankweave-executions"),
-  lockFile: ExecutionLayout.RELATIVE_LOCK_FILE,
   socketLogFile: ".hankweave/logs/websocket.log",
   serverLogFile: ".hankweave/logs/server.log",
   logParsingInterval: 1000, // Check for new log entries every second
@@ -1808,6 +1857,9 @@ export const DEFAULT_CONFIG: Omit<
   idleTimeout: 0, // 0 seconds idle timeout (ie no timeout) for WebSocket and proxy servers (0-255)
   dietOnFinalize: true, // Compress finished runs' journals at shutdown (events.jsonl diet P4); restore with --restore-journal
   journalDietThresholdBytes: 4096, // Fixed threshold for CAS extraction; not documented as tunable
+  // Informational only: model validation reads hankweave.json and the env var
+  // itself, before settings resolution (Models.load in server/llm).
+  noOnlineModelChecks: false,
   sentinel: {
     enablePersistence: true,
     healthCheckGracePeriodMs: 2000, // 2 seconds
@@ -1871,6 +1923,28 @@ export function ensureSchemaUrl(hankPath: string): boolean {
 }
 
 /**
+ * Read a hank file's raw JSON without schema validation — for callers that
+ * need one field before models are checked (the model pre-pass, settings
+ * resolution, remote-hank summaries). Codon model validation belongs to
+ * validateHank, after Models.load has checked every model.
+ */
+export function readRawHankJson(hankPath: string): unknown {
+  try {
+    const source = new HankConfigFile(hankPath).readSnapshot();
+    if (source.kind === "irregular") {
+      throw new Error(`Hank file is not a regular file: ${hankPath}`);
+    }
+    return JSON.parse(source.bytes.toString("utf-8"));
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ENOTDIR") {
+      throw new Error(`Hank file not found: ${hankPath}`);
+    }
+    throw error;
+  }
+}
+
+/**
  * Load and parse a hank file (hank.json).
  * Returns the structured file with meta, overrides, and hank (codons array).
  *
@@ -1882,63 +1956,51 @@ export function loadHankFile(options: {
   hankPath: string;
   modelOverride?: string;
 }): z.infer<typeof hankFileSchema> {
-  try {
-    const { hankPath, modelOverride } = options;
-    const source = new HankConfigFile(hankPath).readSnapshot();
-    if (source.kind === "irregular") {
-      throw new Error(`Hank file is not a regular file: ${hankPath}`);
-    }
-    const rawConfig = JSON.parse(source.bytes.toString("utf-8"));
+  const { hankPath, modelOverride } = options;
+  const rawConfig = readRawHankJson(hankPath);
 
-    // Apply model override directly to the raw hank JSON before schema validation.
-    // This keeps the full Zod validation + model transformation pipeline intact while ensuring per-codon model strings don't block a
-    // valid global override.
-    // It avoids duplicating schemas or bypassing validation, and makes override
-    // semantics explicit: we validate the effective config that will run.
-    const applyModelOverrideRecursive = (configs: unknown): unknown => {
-      if (!Array.isArray(configs)) {
-        return configs;
+  // Apply model override directly to the raw hank JSON before schema validation.
+  // This keeps the full Zod validation + model transformation pipeline intact while ensuring per-codon model strings don't block a
+  // valid global override.
+  // It avoids duplicating schemas or bypassing validation, and makes override
+  // semantics explicit: we validate the effective config that will run.
+  const applyModelOverrideRecursive = (configs: unknown): unknown => {
+    if (!Array.isArray(configs)) {
+      return configs;
+    }
+    return configs.map((config) => {
+      if (!config || typeof config !== "object") {
+        return config;
       }
-      return configs.map((config) => {
-        if (!config || typeof config !== "object") {
-          return config;
-        }
-        const configObj = config as Record<string, unknown>;
-        if (configObj.type === "loop") {
-          return {
-            ...configObj,
-            codons: applyModelOverrideRecursive(configObj.codons),
-          };
-        }
+      const configObj = config as Record<string, unknown>;
+      if (configObj.type === "loop") {
         return {
           ...configObj,
-          model: modelOverride,
+          codons: applyModelOverrideRecursive(configObj.codons),
         };
-      });
-    };
-
-    if (modelOverride && rawConfig && typeof rawConfig === "object") {
-      const configObj = rawConfig as Record<string, unknown>;
-      if ("hank" in configObj) {
-        configObj.hank = applyModelOverrideRecursive(configObj.hank);
       }
-    }
+      return {
+        ...configObj,
+        model: modelOverride,
+      };
+    });
+  };
 
-    // Validate with hankFileSchema
-    const result = hankFileSchema.safeParse(rawConfig);
-    if (!result.success) {
-      const errors = formatZodErrors(result.error, rawConfig);
-      throw new Error(`Invalid hank file:\n${errors}`);
+  if (modelOverride && rawConfig && typeof rawConfig === "object") {
+    const configObj = rawConfig as Record<string, unknown>;
+    if ("hank" in configObj) {
+      configObj.hank = applyModelOverrideRecursive(configObj.hank);
     }
-
-    return result.data;
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === "ENOENT" || code === "ENOTDIR") {
-      throw new Error(`Hank file not found: ${options.hankPath}`);
-    }
-    throw error;
   }
+
+  // Validate with hankFileSchema
+  const result = hankFileSchema.safeParse(rawConfig);
+  if (!result.success) {
+    const errors = formatZodErrors(result.error, rawConfig);
+    throw new Error(`Invalid hank file:\n${errors}`);
+  }
+
+  return result.data;
 }
 
 /**
@@ -1964,7 +2026,7 @@ export function loadRuntimeConfig(runtimeConfigPath?: string): RuntimeConfig {
     const result = runtimeConfigSchema.safeParse(rawConfig);
     if (!result.success) {
       const errors = formatZodErrors(result.error, rawConfig);
-      throw new Error(`Invalid runtime config file:\n${errors}`);
+      throw new Error(`Invalid runtime config file ${configPath}:\n${errors}`);
     }
 
     return result.data;
@@ -1992,7 +2054,7 @@ export function loadRuntimeConfig(runtimeConfigPath?: string): RuntimeConfig {
  *
  * Environment variable mapping:
  * - HANKWEAVE_RUNTIME_PORT -> port (number)
- * - HANKWEAVE_RUNTIME_MODEL -> model (enum: "sonnet" | "opus")
+ * - HANKWEAVE_RUNTIME_MODEL -> model ('<provider>/<model>')
  * - HANKWEAVE_RUNTIME_AUTOSTART -> autostart (boolean)
  * - HANKWEAVE_RUNTIME_SHOW_COSTS -> showCosts (boolean)
  * - HANKWEAVE_RUNTIME_SENTINEL_ENABLE_PERSISTENCE -> sentinel.enablePersistence (boolean)
@@ -2023,7 +2085,8 @@ export function loadHankweaveRuntimeEnvVars(): RuntimeConfig {
       key === "enablePersistence" ||
       key === "waitForAllHealthChecks" ||
       key === "ignoreRigFailures" ||
-      key === "dietOnFinalize"
+      key === "dietOnFinalize" ||
+      key === "noOnlineModelChecks"
     ) {
       return value === "true" || value === "1";
     }
@@ -2084,6 +2147,25 @@ export function loadHankweaveRuntimeEnvVars(): RuntimeConfig {
   return result.data;
 }
 
+const hankOverridesBlockSchema = z
+  .object({ overrides: hankOverridesSchema.optional() })
+  .passthrough();
+
+/**
+ * A hank file's `overrides` block, parsed on its own: an unrelated problem
+ * elsewhere in the hank — a codon model unknown to the model catalog, say —
+ * must not silently drop the hank's budget and model overrides. Everything
+ * else in the file is validateHank's to report.
+ */
+function readHankOverrides(hankPath: string): HankOverrides | undefined {
+  try {
+    const parsed = hankOverridesBlockSchema.safeParse(readRawHankJson(hankPath));
+    return parsed.success ? parsed.data.overrides : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Resolve final runtime configuration by merging all configuration layers.
  *
@@ -2115,39 +2197,30 @@ export function resolveSettings(options?: {
   // Layer 1 (base): Start with default configuration
   let config: Partial<HankweaveConfig> = { ...DEFAULT_CONFIG };
 
-  // Layer 2: Merge runtime config file (hankweave.json)
-  try {
-    const runtimeConfig = loadRuntimeConfig(runtimeConfigPath);
-    if (runtimeConfig.budget?.maxDollars !== undefined) {
-      runtimeHankMaxDollarsValues.push(runtimeConfig.budget.maxDollars);
-    }
-    if (runtimeConfig.budget?.maxTimeSeconds !== undefined) {
-      runtimeHankMaxTimeSecondsValues.push(runtimeConfig.budget.maxTimeSeconds);
-    }
-    config = deepMerge(config, runtimeConfig);
-  } catch (_error) {
-    // Runtime config is optional, so silently continue if it doesn't exist
-    // (loadRuntimeConfig already returns {} for missing files)
+  // Layer 2: Merge runtime config file (hankweave.json). A missing file is
+  // an empty layer; an invalid one is an error. Ignoring it would silently
+  // drop every setting in it, budget ceilings included — and since model
+  // names resolve exactly, a `model` the catalog does not know makes the
+  // whole file invalid.
+  const runtimeConfig = loadRuntimeConfig(runtimeConfigPath);
+  if (runtimeConfig.budget?.maxDollars !== undefined) {
+    runtimeHankMaxDollarsValues.push(runtimeConfig.budget.maxDollars);
   }
+  if (runtimeConfig.budget?.maxTimeSeconds !== undefined) {
+    runtimeHankMaxTimeSecondsValues.push(runtimeConfig.budget.maxTimeSeconds);
+  }
+  config = deepMerge(config, runtimeConfig);
 
   // Layer 3: Merge hank file overrides (if hank path provided)
-  if (hankPath) {
-    try {
-      const hankFile = loadHankFile({ hankPath });
-
-      if (hankFile.overrides) {
-        if (hankFile.overrides.budget?.maxDollars !== undefined) {
-          runtimeHankMaxDollarsValues.push(hankFile.overrides.budget.maxDollars);
-        }
-        if (hankFile.overrides.budget?.maxTimeSeconds !== undefined) {
-          runtimeHankMaxTimeSecondsValues.push(hankFile.overrides.budget.maxTimeSeconds);
-        }
-        config = deepMerge(config, hankFile.overrides);
-      }
-    } catch (_error) {
-      // Hank file errors should not prevent config resolution
-      // The hank file is validated separately during codon loading
+  const hankOverrides = hankPath ? readHankOverrides(hankPath) : undefined;
+  if (hankOverrides) {
+    if (hankOverrides.budget?.maxDollars !== undefined) {
+      runtimeHankMaxDollarsValues.push(hankOverrides.budget.maxDollars);
     }
+    if (hankOverrides.budget?.maxTimeSeconds !== undefined) {
+      runtimeHankMaxTimeSecondsValues.push(hankOverrides.budget.maxTimeSeconds);
+    }
+    config = deepMerge(config, hankOverrides);
   }
 
   // Layer 4: Merge environment variables (HANKWEAVE_RUNTIME_*)
@@ -2536,6 +2609,23 @@ export function loadCodonSequence(options: { configPath: string; modelOverride?:
             }
             seenSentinelIds.add(sentinelId);
           }
+
+          // A sentinel model written wrongly is a config error. One whose
+          // harness check failed (no credentials, unknown to its provider)
+          // is reported at startup and skipped at runtime, as sentinels
+          // with an unavailable provider always were (spec 72).
+          const sentinelModel =
+            sentinelConfig && typeof sentinelConfig === "object" && "model" in sentinelConfig
+              ? (sentinelConfig as { model: unknown }).model
+              : undefined;
+          if (typeof sentinelModel === "string") {
+            const check = Models.current().check(sentinelModel, "sentinel");
+            if (!check.ok && check.stage === "name") {
+              validationErrors.push(
+                `${entryLabel}: Invalid sentinel model '${sentinelModel}': ${check.message} [ERROR]`,
+              );
+            }
+          }
         }
       }
     }
@@ -2617,8 +2707,6 @@ export interface ValidationResult {
     provider: string;
     passed: boolean;
     result: ShimSelfTestResult;
-    /** Failure classification, present when `passed` is false. Routes guidance. */
-    category?: SelfTestFailureCategory;
   }>;
   /** Hank-level budget config for display in the budget resolution table */
   hankBudget?: {
@@ -2673,64 +2761,6 @@ export function validateRequiredTools(
 }
 
 /**
- * Classify an in-band (harness ran and returned a result) self-test failure so
- * the final error can route the user to the right fix instead of always blaming
- * API keys. Launch failures are classified separately at the throw site.
- */
-export function classifyInBandSelfTest(result: ShimSelfTestResult): SelfTestFailureCategory {
-  if (!result.agent?.found) return "binary-missing";
-  const failedApiKeyCheck = result.checks?.some(
-    (check) => !check.passed && check.name === "api_key",
-  );
-  if (failedApiKeyCheck) return "auth";
-  return "check";
-}
-
-/**
- * Build the guidance line(s) appended to the self-test failure error, tailored
- * to the set of failure categories actually present. A launch/runtime crash must
- * never be reported as an API-key problem.
- */
-export function buildSelfTestGuidance(categories: Set<SelfTestFailureCategory>): string {
-  const lines: string[] = [];
-  if (categories.has("launch")) {
-    lines.push("The harness failed to start. See the captured output above.");
-  }
-  if (categories.has("binary-missing")) {
-    lines.push(
-      "The agent for one or more models could not be located — see the message above for where it was searched or why it failed to load.",
-    );
-  }
-  if (categories.has("auth")) {
-    lines.push("Ensure the required API keys / credentials are configured correctly.");
-  }
-  // "check" and "unknown" carry their own per-model message; no extra guidance.
-  return lines.join("\n");
-}
-
-/**
- * Render a failed self-test as a per-model bullet for the aggregate error.
- *
- * The header is the model identity + the shim's `overall.message`. For in-band
- * failures that message is generic ("One or more checks failed"), so we append
- * each FAILED check's specific message (e.g. the `agent_found` check that names
- * where the binary was searched). Launch failures carry no checks — their
- * `overall.message` already holds the actionable detail — so only the header shows.
- */
-export function formatFailedSelfTest(test: {
-  modelName: string;
-  provider: string;
-  modelId: string;
-  result: ShimSelfTestResult;
-}): string {
-  const header = `  - ${test.modelName} (${test.provider}/${test.modelId}): ${test.result.overall.message}`;
-  const failedChecks = (test.result.checks ?? []).filter((check) => !check.passed);
-  if (failedChecks.length === 0) return header;
-  const detail = failedChecks.map((check) => `      • ${check.name}: ${check.message}`).join("\n");
-  return `${header}\n${detail}`;
-}
-
-/**
  * Validate hank configuration with enhanced checks.
  *
  * This performs all the validation of loadCodonSequence plus additional
@@ -2755,8 +2785,14 @@ export async function validateHank(options: {
    * keys for every model in the hank would make replays non-hermetic.
    */
   skipSelfTests?: boolean;
+  /**
+   * The run's resolved budget from every config layer (runtime, hank, CLI):
+   * a dollar ceiling puts every codon under a dollar budget, and
+   * `unpricedModels: "refuse"` turns an unpriced model under one into an error.
+   */
+  budgetPolicy?: { maxDollars?: number; unpricedModels?: "estimate" | "refuse" };
 }): Promise<ValidationResult> {
-  const { configPath, executionPath, logger, modelOverride, skipSelfTests } = options;
+  const { configPath, executionPath, logger, modelOverride, skipSelfTests, budgetPolicy } = options;
   const hank = HankDir.forConfig(configPath);
 
   // Load hank file first to get requirements
@@ -3177,149 +3213,33 @@ export async function validateHank(options: {
     }
   }
 
-  // Collect unique models and run a self-test preflight for each shim.
-  // Runs on every startup (fail-fast), not just --validate — validateHank is
-  // called unconditionally during normal startup (see server/index.ts).
-  const uniqueModels = new Map<string, ModelInfo>();
-
-  function collectModelsRecursive(config: CodonConfig): void {
-    if ("codons" in config) {
-      // Loop: collect from all nested codons
-      for (const codon of config.codons) {
-        collectModelsRecursive(codon);
-      }
-    } else {
-      // Codon: add model to map, keyed by the full identity that determines
-      // its self-test — harness + provider + model. Keying on modelId alone
-      // would collapse an explicit pi-override spelling with the same model's
-      // default (claude-agent-sdk) codon and silently skip one of the two
-      // self-tests.
-      const model = config.model;
-      uniqueModels.set(`${selectHarness(model)}:${model.providerId}/${model.modelId}`, model);
-    }
-  }
-
-  // Collect all unique models
-  for (const config of codons) {
-    collectModelsRecursive(config);
-  }
-
-  // Run self-tests for each unique model
+  // Harness prerequisites (SDK, credentials, the harness's own catalog) were
+  // checked per model before any config was parsed (spec 72: Models.load);
+  // a failure there already failed the model's validation above. The steps
+  // that confirmed each codon model feed --validate output and telemetry.
   if (skipSelfTests) {
-    logger.log("Skipping model self-tests (replay mode: no provider calls are made)");
-  } else if (uniqueModels.size > 0) {
-    result.shimSelfTests = [];
-
-    for (const modelInfo of uniqueModels.values()) {
-      const modelId = modelInfo.modelId;
-      logger.log(
-        `Running self-test for model: ${modelInfo.name} (${modelInfo.providerId}/${modelId})`,
-      );
-
-      // Create temporary execution path for self-test
-      const tempExecutionPath = path.join(os.tmpdir(), `hankweave-self-test-exec-${Date.now()}`);
-      if (!fs.existsSync(tempExecutionPath)) {
-        fs.mkdirSync(tempExecutionPath, { recursive: true });
-      }
-
-      try {
-        // Use CodonRunner's static method to run self-test
-        const { CodonRunner } = await import("./codon-runner.js");
-        const selfTestResult = await CodonRunner.runSelfTestForModel(
-          modelInfo,
-          tempExecutionPath,
-          logger,
-          undefined, // anthropicBaseUrl - could be passed from config if needed
-        );
-
-        // Record result
-        result.shimSelfTests.push({
-          modelId,
-          modelName: modelInfo.name,
-          provider: modelInfo.providerId,
-          passed: selfTestResult.overall.passed,
-          result: selfTestResult,
-          category: selfTestResult.overall.passed
-            ? undefined
-            : classifyInBandSelfTest(selfTestResult),
-        });
-
-        // Add warning if self-test failed
-        if (!selfTestResult.overall.passed) {
-          result.warnings.push(
-            `Self-test failed for ${modelInfo.name} (${modelInfo.providerId}/${modelId}): ${selfTestResult.overall.message}`,
-          );
-        }
-
-        logger.log(
-          `Self-test ${selfTestResult.overall.passed ? "PASSED" : "FAILED"} for ${modelInfo.name}`,
-        );
-      } catch (error) {
-        // An exception here means the harness never produced a result — it failed
-        // to LAUNCH (module-load or SDK-initialization crash).
-        const errorMessage = error instanceof Error ? error.message : String(error);
-
-        logger.log(`Self-test error for ${modelInfo.name}: ${errorMessage}`, "error");
-
-        // Record as a failed test so it will be caught by the failure check
-        result.shimSelfTests.push({
-          modelId,
-          modelName: modelInfo.name,
-          provider: modelInfo.providerId,
-          passed: false,
-          category: "launch",
-          result: {
-            shim: { name: "unknown", version: "unknown" },
-            agent: { name: "unknown", version: "unknown", found: false },
-            checks: [],
-            overall: {
-              passed: false,
-              message: errorMessage,
-            },
-          },
-        });
-
-        result.warnings.push(
-          `Self-test error for ${modelInfo.name} (${modelInfo.providerId}/${modelId}): ${errorMessage}`,
-        );
-      } finally {
-        // Clean up temporary execution path
-        if (fs.existsSync(tempExecutionPath)) {
-          // Use platform-specific retry configuration (Windows needs more retries/delays)
-          const isWindows = process.platform === "win32";
-          const retryConfig = isWindows
-            ? CLEANUP_RETRY_CONFIG.windows
-            : CLEANUP_RETRY_CONFIG.default;
-
-          rmSyncWithRetry(tempExecutionPath, {
-            recursive: true,
-            force: true,
-            ...retryConfig,
-            logger,
-          });
-        }
-      }
-    }
+    logger.log("Skipping model harness checks (replay mode: no provider calls are made)");
+  } else {
+    result.shimSelfTests = Models.current().harnessReports();
   }
 
   // Budget preflight warnings
-  const budgetWarnings = computeBudgetWarnings(hankFile.overrides?.budget, codons);
+  const budgetWarnings = computeBudgetWarnings(hankFile.overrides?.budget, codons, {
+    ceilingMaxDollars: budgetPolicy?.maxDollars,
+  });
   result.warnings.push(...budgetWarnings);
 
-  // Check if any self-tests failed and throw error if so
-  if (result.shimSelfTests && result.shimSelfTests.length > 0) {
-    const failedTests = result.shimSelfTests.filter((test) => !test.passed);
-    if (failedTests.length > 0) {
-      const errorMessages = failedTests.map(formatFailedSelfTest);
-      // Tailor the guidance to the failure categories that actually occurred, so a
-      // launch/runtime crash is never reported as an API-key problem.
-      const categories = new Set<SelfTestFailureCategory>(
-        failedTests.map((test) => test.category ?? "unknown"),
-      );
-      const guidance = buildSelfTestGuidance(categories);
+  if (budgetPolicy?.unpricedModels === "refuse") {
+    const unpriced = codonsUnderDollarBudget(hankFile.overrides?.budget, codons, {
+      ceilingMaxDollars: budgetPolicy.maxDollars,
+    }).filter((codon) => budgetPriceStatus(codon.model) === "unknown");
+    if (unpriced.length > 0) {
       throw new Error(
-        `Self-test failed for ${failedTests.length} model(s):\n${errorMessages.join("\n")}` +
-          (guidance ? `\n\n${guidance}` : ""),
+        `Budget policy unpricedModels: "refuse": no catalog source has a price for ` +
+          unpriced
+            .map((c) => `'${c.model.providerId}/${c.model.modelId}' (codon '${c.id}')`)
+            .join(", ") +
+          ". Declare the price in a 'models' block, or set budget.unpricedModels to \"estimate\".",
       );
     }
   }

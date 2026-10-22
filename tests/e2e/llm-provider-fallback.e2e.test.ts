@@ -1,9 +1,22 @@
 import { beforeEach, describe, expect, it } from "bun:test";
-import { LlmProviderRegistry } from "../../server/llm/llm-provider-registry.js";
-import { PROVIDER_DEFINITIONS } from "../../server/llm/provider-config.js";
+import { bundledCatalogSnapshot } from "../../server/llm/internal/catalog-store.js";
+import { PROVIDER_DEFINITIONS } from "../../server/sentinels/provider-config.js";
+import { ProviderHealth } from "../../server/sentinels/provider-health.js";
 import { Logger } from "../../server/utils.js";
 import { captureEnv, restoreEnv } from "../utils/env-test-helpers.js";
 import { MockLlmProviderRegistry } from "../utils/mock-llm-provider-registry.js";
+
+/** One sentinel-capable model per provider, as full "provider/model" ids. */
+const ANTHROPIC_MODEL = "anthropic/claude-haiku-4-5";
+const OPENAI_MODEL = "openai/gpt-4o-mini";
+const GOOGLE_MODEL = "google/gemini-2.5-flash";
+
+/** Catalog models for a provider (ProviderHealth no longer enumerates models). */
+function catalogModelsFor(providerId: string): string[] {
+  return bundledCatalogSnapshot()
+    .rows.filter((row) => row.providerId === providerId)
+    .map((row) => `${row.providerId}/${row.modelId}`);
+}
 
 describe("Provider Fallback Scenarios", () => {
   let logs: string[] = [];
@@ -32,7 +45,7 @@ describe("Provider Fallback Scenarios", () => {
           delete process.env[`HANKWEAVE_SENTINEL_${def.apiKeyEnvVar}`];
         }
 
-        const registry = new LlmProviderRegistry({ logger: mockLogger });
+        const registry = new ProviderHealth({ logger: mockLogger });
         const statuses = registry.getProviderStatus();
 
         // All providers should be unavailable. API-key providers report
@@ -44,8 +57,9 @@ describe("Provider Fallback Scenarios", () => {
         }
 
         // No models should be available
-        const availableModels = registry.getAvailableModels();
-        expect(availableModels).toHaveLength(0);
+        for (const model of [ANTHROPIC_MODEL, OPENAI_MODEL, GOOGLE_MODEL]) {
+          expect(registry.isModelAvailable(model)).toBe(false);
+        }
 
         console.log("✅ Handled scenario with no providers available");
       } finally {
@@ -68,7 +82,7 @@ describe("Provider Fallback Scenarios", () => {
         process.env.GEMINI_API_KEY = "test-google-key";
         // GROQ_API_KEY is intentionally not set
 
-        const registry = new LlmProviderRegistry({ logger: mockLogger });
+        const registry = new ProviderHealth({ logger: mockLogger });
         const statuses = registry.getProviderStatus();
 
         // Count available providers (we set up 3 out of 4 total)
@@ -80,10 +94,10 @@ describe("Provider Fallback Scenarios", () => {
         // Total providers should match PROVIDER_DEFINITIONS
         expect(statuses.size).toBe(PROVIDER_DEFINITIONS.length);
 
-        // Should have models from all providers
-        const anthropicModels = registry.getModelsForProvider("anthropic");
-        const openaiModels = registry.getModelsForProvider("openai");
-        const googleModels = registry.getModelsForProvider("google");
+        // The catalog should have models from all providers
+        const anthropicModels = catalogModelsFor("anthropic");
+        const openaiModels = catalogModelsFor("openai");
+        const googleModels = catalogModelsFor("google");
 
         expect(anthropicModels.length).toBeGreaterThan(0);
         expect(openaiModels.length).toBeGreaterThan(0);
@@ -107,7 +121,7 @@ describe("Provider Fallback Scenarios", () => {
         }
         process.env.ANTHROPIC_API_KEY = "test-key";
 
-        const registry = new LlmProviderRegistry({
+        const registry = new ProviderHealth({
           logger: mockLogger,
           healthCheckTimeout: 5000,
         });
@@ -122,20 +136,18 @@ describe("Provider Fallback Scenarios", () => {
 
         // Note: Even though Anthropic is available, health checks may fail with test keys
         // so we test the logic rather than expecting specific model availability
-        const availableModels = registry.getAvailableModels();
-        const anthropicModels = availableModels.filter((m) => m.startsWith("anthropic/"));
-        const nonAnthropicModels = availableModels.filter((m) => !m.startsWith("anthropic/"));
+        const anthropicAvailable = registry.isModelAvailable(ANTHROPIC_MODEL);
 
-        // With test keys, health checks may fail, so models might not be available
-        // But we should have more Anthropic models than other providers in the registry
-        const allAnthropicModels = registry.getModelsForProvider("anthropic");
-        const _allOpenaiModels = registry.getModelsForProvider("openai");
-
-        expect(allAnthropicModels.length).toBeGreaterThan(0);
-        expect(nonAnthropicModels.length).toBe(0); // Other providers have no API keys
+        // Other providers have no API keys, so their models are unavailable
+        const openaiResult = registry.getProviderForModel(OPENAI_MODEL);
+        const googleResult = registry.getProviderForModel(GOOGLE_MODEL);
+        expect(openaiResult.success).toBe(false);
+        expect(googleResult.success).toBe(false);
+        if (!openaiResult.success) expect(openaiResult.reason).toBe("provider-unavailable");
+        if (!googleResult.success) expect(googleResult.reason).toBe("provider-unavailable");
 
         console.log(
-          `✅ Partial failure handled: Anthropic has ${allAnthropicModels.length} models registered, ${anthropicModels.length} available after health checks`,
+          `✅ Partial failure handled: ${ANTHROPIC_MODEL} ${anthropicAvailable ? "available" : "unavailable"} after health checks`,
         );
       } finally {
         restoreEnv(originalEnv);
@@ -172,8 +184,8 @@ describe("Provider Fallback Scenarios", () => {
       }
 
       // Only healthy providers should have available models
-      const claudeModel = registry.getProviderForModel("claude-3-5-sonnet-20241022");
-      const gptModel = registry.getProviderForModel("gpt-4o-mini");
+      const claudeModel = registry.getProviderForModel("anthropic/claude-3-5-sonnet-20241022");
+      const gptModel = registry.getProviderForModel("openai/gpt-4o-mini");
 
       expect(claudeModel.success).toBe(false); // Unhealthy provider
       expect(gptModel.success).toBe(true); // Healthy provider
@@ -182,7 +194,7 @@ describe("Provider Fallback Scenarios", () => {
     });
 
     it("should report all provider statuses comprehensively", async () => {
-      const registry = new LlmProviderRegistry({ logger: mockLogger });
+      const registry = new ProviderHealth({ logger: mockLogger });
       const statuses = await registry.performHealthChecks();
 
       // Create availability report
@@ -253,7 +265,11 @@ describe("Provider Fallback Scenarios", () => {
       registry.setProviderHealth("openai", true);
 
       // Simulate sentinel fallback logic
-      const preferredModels = ["claude-3-5-sonnet-20241022", "gpt-4o-mini", "gemini-1.5-flash"];
+      const preferredModels = [
+        "anthropic/claude-3-5-sonnet-20241022",
+        "openai/gpt-4o-mini",
+        "google/gemini-1.5-flash",
+      ];
       let selectedModel = null;
 
       for (const modelName of preferredModels) {
@@ -265,14 +281,14 @@ describe("Provider Fallback Scenarios", () => {
       }
 
       // Should fall back to OpenAI model
-      expect(selectedModel).toBe("gpt-4o-mini");
+      expect(selectedModel).toBe("openai/gpt-4o-mini");
 
       // Calculate cost difference
-      const claudeCost = registry.calculateCost("claude-3-5-sonnet-20241022", {
+      const claudeCost = registry.calculateCost("anthropic/claude-3-5-sonnet-20241022", {
         inputTokens: 1000,
         outputTokens: 500,
       });
-      const gptCost = registry.calculateCost("gpt-4o-mini", {
+      const gptCost = registry.calculateCost("openai/gpt-4o-mini", {
         inputTokens: 1000,
         outputTokens: 500,
       });
@@ -335,7 +351,7 @@ describe("Provider Fallback Scenarios", () => {
         process.env.ANTHROPIC_API_KEY = "invalid-key";
         process.env.OPENAI_API_KEY = "another-invalid-key";
 
-        const registry = new LlmProviderRegistry({ logger: mockLogger });
+        const registry = new ProviderHealth({ logger: mockLogger });
 
         // Providers should be marked as available (key exists) but will fail health checks
         const statuses = registry.getProviderStatus();
@@ -344,8 +360,6 @@ describe("Provider Fallback Scenarios", () => {
 
         // Models should NOT be available with invalid keys (provider is available but unhealthy)
         // The registry marks providers with invalid keys as unhealthy immediately
-        // Provider-qualified so the lookup can't resolve to another reseller of
-        // the same model that has no key set.
         const claudeResult = registry.getProviderForModel("anthropic/claude-haiku-4-5-20251001");
 
         // The model won't be available because the provider has an invalid key
@@ -393,21 +407,22 @@ describe("Provider Fallback Scenarios", () => {
   });
 
   describe("model availability edge cases", () => {
-    it("should handle model name variations", () => {
-      const registry = new MockLlmProviderRegistry();
-      registry.setProviderAvailable("anthropic", true);
+    it("should only resolve full provider/model ids", () => {
+      const registry = new ProviderHealth({ logger: mockLogger });
 
-      // Test both short and full model names
-      const shortNameResult = registry.getModelInfo("claude-3-5-sonnet-20241022");
-      const fullNameResult = registry.getModelInfo("anthropic/claude-3-5-sonnet-20241022");
+      // Spec 72: a sentinel model is always "provider/model"; bare ids don't resolve
+      const bareResult = registry.getModelInfo("claude-haiku-4-5");
+      const fullResult = registry.getModelInfo(ANTHROPIC_MODEL);
 
-      expect(shortNameResult.success).toBe(true);
-      expect(fullNameResult.success).toBe(true);
-      if (shortNameResult.success && fullNameResult.success) {
-        expect(shortNameResult.info.fullModelId).toBe(fullNameResult.info.fullModelId);
+      expect(bareResult.success).toBe(false);
+      if (!bareResult.success) expect(bareResult.reason).toBe("model-not-found");
+      expect(fullResult.success).toBe(true);
+      if (fullResult.success) {
+        expect(fullResult.info.providerId).toBe("anthropic");
+        expect(fullResult.info.modelId).toBe("claude-haiku-4-5");
       }
 
-      console.log("✅ Model name variations handled correctly");
+      console.log("✅ Bare model ids rejected, full ids resolved");
     });
 
     it("should handle provider-specific model availability", () => {
@@ -426,9 +441,9 @@ describe("Provider Fallback Scenarios", () => {
       expect(otherModels.length).toBe(0);
 
       // Test specific model availability
-      expect(registry.isModelAvailable("claude-3-5-sonnet-20241022")).toBe(true);
-      expect(registry.isModelAvailable("gpt-4o-mini")).toBe(false);
-      expect(registry.isModelAvailable("gemini-1.5-flash")).toBe(false);
+      expect(registry.isModelAvailable("anthropic/claude-3-5-sonnet-20241022")).toBe(true);
+      expect(registry.isModelAvailable("openai/gpt-4o-mini")).toBe(false);
+      expect(registry.isModelAvailable("google/gemini-1.5-flash")).toBe(false);
 
       console.log(
         `✅ Provider-specific availability: ${anthropicModels.length} Anthropic models, 0 others`,
@@ -448,15 +463,15 @@ describe("Provider Fallback Scenarios", () => {
       // Test cost calculation for different providers
       const testTokens = { input: 10000, output: 2000 };
 
-      const claudeCost = registry.calculateCost("claude-3-5-sonnet-20241022", {
+      const claudeCost = registry.calculateCost("anthropic/claude-3-5-sonnet-20241022", {
         inputTokens: testTokens.input,
         outputTokens: testTokens.output,
       });
-      const gptCost = registry.calculateCost("gpt-4o-mini", {
+      const gptCost = registry.calculateCost("openai/gpt-4o-mini", {
         inputTokens: testTokens.input,
         outputTokens: testTokens.output,
       });
-      const geminiCost = registry.calculateCost("gemini-1.5-flash", {
+      const geminiCost = registry.calculateCost("google/gemini-1.5-flash", {
         inputTokens: testTokens.input,
         outputTokens: testTokens.output,
       });
@@ -465,10 +480,10 @@ describe("Provider Fallback Scenarios", () => {
         {
           provider: "Claude",
           cost: claudeCost,
-          model: "claude-3-5-sonnet-20241022",
+          model: "anthropic/claude-3-5-sonnet-20241022",
         },
-        { provider: "GPT", cost: gptCost, model: "gpt-4o-mini" },
-        { provider: "Gemini", cost: geminiCost, model: "gemini-1.5-flash" },
+        { provider: "GPT", cost: gptCost, model: "openai/gpt-4o-mini" },
+        { provider: "Gemini", cost: geminiCost, model: "google/gemini-1.5-flash" },
       ]
         .filter((c) => c.cost !== null)
         .sort((a, b) => (a.cost || 0) - (b.cost || 0));
@@ -505,7 +520,7 @@ describe("Provider Fallback Scenarios", () => {
 
       registry.setProviderAvailable("test", true);
 
-      const cost = registry.calculateCost("free-model", {
+      const cost = registry.calculateCost("test/free-model", {
         inputTokens: 1000,
         outputTokens: 500,
       });
@@ -521,7 +536,7 @@ describe("Provider Fallback Scenarios", () => {
   describe("real world provider combinations", () => {
     it("should demonstrate real provider discovery", async () => {
       // Test with whatever providers are actually available
-      const registry = new LlmProviderRegistry({
+      const registry = new ProviderHealth({
         logger: mockLogger,
         performHealthCheckOnInit: false,
       });
@@ -535,8 +550,7 @@ describe("Provider Fallback Scenarios", () => {
       for (const [id, status] of statuses) {
         if (status.status === "available") {
           console.log(`  ✅ ${id}: Available`);
-          const models = registry.getModelsForProvider(id);
-          console.log(`     Models: ${models.length}`);
+          console.log(`     Catalog models: ${catalogModelsFor(id).length}`);
         } else {
           console.log(`  ❌ ${id}: ${status.error}`);
         }
@@ -547,7 +561,9 @@ describe("Provider Fallback Scenarios", () => {
 
       // If providers are available, test model access (but health checks may fail with test keys)
       if (availableCount > 0) {
-        const availableModels = registry.getAvailableModels();
+        const availableModels = [ANTHROPIC_MODEL, OPENAI_MODEL, GOOGLE_MODEL].filter((model) =>
+          registry.isModelAvailable(model),
+        );
 
         if (availableModels.length > 0) {
           // Test accessing first available model
@@ -574,7 +590,7 @@ describe("Provider Fallback Scenarios", () => {
         return;
       }
 
-      const registry = new LlmProviderRegistry({
+      const registry = new ProviderHealth({
         logger: mockLogger,
         healthCheckTimeout: 8000, // Longer timeout for real checks
       });
@@ -605,10 +621,17 @@ describe("Provider Fallback Scenarios", () => {
       // The system should handle any combination gracefully
       expect(healthyCount + unhealthyCount + unavailableCount).toBe(statuses.size);
 
-      // If we have healthy providers, we should have available models
-      if (healthyCount > 0) {
-        const availableModels = registry.getAvailableModels();
-        expect(availableModels.length).toBeGreaterThan(0);
+      // A healthy provider's models should be available
+      const providerModels: Record<string, string> = {
+        anthropic: ANTHROPIC_MODEL,
+        openai: OPENAI_MODEL,
+        google: GOOGLE_MODEL,
+      };
+      for (const [id, status] of statuses) {
+        const model = providerModels[id];
+        if (model && status.status === "available" && status.healthy) {
+          expect(registry.isModelAvailable(model)).toBe(true);
+        }
       }
     }, 20000); // 20s timeout for multiple real health checks
   });
@@ -627,11 +650,11 @@ describe("Provider Fallback Scenarios", () => {
 
       // Perform many operations
       for (let i = 0; i < 100; i++) {
-        registry.isModelAvailable("claude-3-5-sonnet-20241022"); // Should be false (unhealthy)
-        registry.isModelAvailable("gpt-4o-mini"); // Should be false (unavailable)
-        registry.isModelAvailable("gemini-1.5-flash"); // Should be true
+        registry.isModelAvailable("anthropic/claude-3-5-sonnet-20241022"); // Should be false (unhealthy)
+        registry.isModelAvailable("openai/gpt-4o-mini"); // Should be false (unavailable)
+        registry.isModelAvailable("google/gemini-1.5-flash"); // Should be true
         registry.getAvailableModels();
-        registry.calculateCost("gemini-1.5-flash", {
+        registry.calculateCost("google/gemini-1.5-flash", {
           inputTokens: 1000,
           outputTokens: 500,
         });

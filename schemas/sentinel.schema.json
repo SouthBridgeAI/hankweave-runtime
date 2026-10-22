@@ -584,7 +584,7 @@
         },
         "model": {
           "type": "string",
-          "description": "The full model ID to use (e.g., \"anthropic/claude-3-5-sonnet-20241022\", \"openai/gpt-4-turbo\")."
+          "description": "The model to call, as '<provider>/<model>' for a provider sentinels run on (anthropic, openai, google, groq, deepseek, amazon-bedrock), e.g. 'anthropic/claude-haiku-4-5'."
         },
         "structuredOutput": {
           "type": "object",

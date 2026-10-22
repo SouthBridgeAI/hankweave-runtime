@@ -1,38 +1,28 @@
 /**
- * Unit tests for server/config-validation/model-validator.ts:
+ * Unit tests for what remains of server/config-validation/model-validator.ts
+ * and the dispatch-time routing around it (spec 72). Spellings are checked
+ * by the model module (llm-spelling.test.ts); this file covers persisted
+ * records:
  *
- * - validateModel: the returned ModelInfo always carries the model's REAL
- *   identity (providerId = registry provider, modelId = canonical id).
- *   Harness selection is late-bound at dispatch (selectHarness); explicit
- *   "pi/…" spellings set harnessOverride: "pi" instead of rewriting identity.
- *   The pi routing string is derived at dispatch via toPiTarget — asserted
- *   here wherever the old tests asserted the persisted "pi/<provider>/<model>"
- *   encoding.
- * - normalizeLegacyProviderModelInfo: pre-upgrade executions persisted either
- *   shim providerIds ("google"/"openai"/"opencode") or the retired "pi"
- *   pseudo-provider encoding. Continuation runs restore the plan verbatim
- *   WITHOUT re-running model validation, so the migration must reverse-map
- *   those to real provider identities.
+ * - normalizeLegacyProviderModelInfo: pre-upgrade executions persisted the
+ *   retired "pi" pseudo-provider encoding (providerId "pi", modelId
+ *   "<provider>/<model>") or the removed opencode shim's. Continuation runs
+ *   restore the plan verbatim WITHOUT re-running model validation, so the
+ *   migration splits those into real identities. A bare id keeps its raw
+ *   shape: nothing infers a provider any more.
+ * - CodonRunner.canRun / selectHarness: harness selection is late-bound at
+ *   dispatch from the model's real identity; undefined when no harness runs
+ *   the provider (only an old persisted plan can hold one).
+ * - The ModelInfo schema still loads plans persisted with the old match types
+ *   and the "unverified" confidence.
  */
 
 import { describe, expect, test } from "bun:test";
-import {
-  normalizeLegacyProviderModelInfo,
-  validateModel,
-} from "../../server/config-validation/model-validator";
-import { LlmProviderRegistry } from "../../server/llm/llm-provider-registry";
-import type { ModelInfo } from "../../server/llm/models-dev-schema";
+import { CodonRunner } from "../../server/codon-runner";
+import { normalizeLegacyProviderModelInfo } from "../../server/config-validation/model-validator";
+import { type ModelInfo, Models } from "../../server/llm/index";
+import { modelInfoSchema } from "../../server/llm/internal/models-dev-schema";
 import { selectHarness, toPiTarget } from "../../server/provider-ids";
-import { Logger } from "../../server/utils";
-
-// Initialize the real registry (needed for non-passthrough fallback tests and
-// for bare opencode short spellings like "glm-5.2", whose provider only the
-// registry can infer — state-manager passes the singleton the same way).
-const logger = new Logger("/dev/null");
-const registry = LlmProviderRegistry.getInstance({
-  logger,
-  performHealthCheckOnInit: false,
-});
 
 function makeModelInfo(providerId: string, modelId: string): ModelInfo {
   return {
@@ -50,403 +40,14 @@ function makeModelInfo(providerId: string, modelId: string): ModelInfo {
   };
 }
 
-/** The pi routing string dispatch would derive for a validation result. */
-function piRouteOf(modelInfo: ModelInfo | undefined): string | undefined {
-  return modelInfo ? toPiTarget(modelInfo.providerId, modelInfo.modelId) : undefined;
+function resolve(spelling: string): ModelInfo {
+  const result = Models.current().check(spelling, "codon");
+  if (!result.ok) throw new Error(`${spelling}: ${result.kind}: ${result.message}`);
+  return result.model;
 }
 
-describe("Model Validator — Passthrough Providers", () => {
-  describe("opencode → pi passthrough rewrite (opencode shim removed)", () => {
-    test("opencode/google/gemini-2.5-flash forces the pi harness with a real identity", () => {
-      const result = validateModel("opencode/google/gemini-2.5-flash", registry);
-      expect(result.valid).toBe(true);
-      expect(result.modelInfo?.providerId).toBe("google");
-      expect(result.modelInfo?.modelId).toBe("gemini-2.5-flash");
-      expect(result.modelInfo?.harnessOverride).toBe("pi");
-      expect(result.matchType).toBe("exact");
-    });
-
-    test("opencode/cerebras/zai-glm-4.7 forces the pi harness", () => {
-      const result = validateModel("opencode/cerebras/zai-glm-4.7", registry);
-      expect(result.valid).toBe(true);
-      expect(result.modelInfo?.providerId).toBe("cerebras");
-      expect(result.modelInfo?.modelId).toBe("zai-glm-4.7");
-      expect(result.modelInfo?.harnessOverride).toBe("pi");
-    });
-
-    test("opencode/anthropic/claude-haiku-4-5 forces an Anthropic model onto pi", () => {
-      const result = validateModel("opencode/anthropic/claude-haiku-4-5", registry);
-      expect(result.valid).toBe(true);
-      expect(result.modelInfo?.providerId).toBe("anthropic");
-      expect(result.modelInfo?.modelId).toBe("claude-haiku-4-5");
-      expect(result.modelInfo?.harnessOverride).toBe("pi");
-      if (result.modelInfo) expect(selectHarness(result.modelInfo)).toBe("pi");
-    });
-
-    test("opencode/glm-5.2 lands on the canonical zai pi route", () => {
-      const result = validateModel("opencode/glm-5.2", registry);
-      expect(result.valid).toBe(true);
-      expect(result.modelInfo?.harnessOverride).toBe("pi");
-      expect(piRouteOf(result.modelInfo)).toBe("zai/glm-5.2");
-    });
-  });
-
-  describe("pi passthrough routing", () => {
-    test("pi/anthropic/claude-haiku-4-5 keeps the real identity and forces pi", () => {
-      const result = validateModel("pi/anthropic/claude-haiku-4-5", registry);
-      expect(result.valid).toBe(true);
-      expect(result.modelInfo?.providerId).toBe("anthropic");
-      expect(result.modelInfo?.modelId).toBe("claude-haiku-4-5");
-      expect(result.modelInfo?.harnessOverride).toBe("pi");
-      if (result.modelInfo) expect(selectHarness(result.modelInfo)).toBe("pi");
-      expect(result.matchType).toBe("exact");
-    });
-
-    test("pi/openai/gpt-5.4 resolves with a real identity", () => {
-      const result = validateModel("pi/openai/gpt-5.4", registry);
-      expect(result.valid).toBe(true);
-      expect(result.modelInfo?.providerId).toBe("openai");
-      expect(result.modelInfo?.modelId).toBe("gpt-5.4");
-      expect(result.modelInfo?.harnessOverride).toBe("pi");
-    });
-
-    test("pi/deepseek/deepseek-v4-flash resolves with a real identity", () => {
-      const result = validateModel("pi/deepseek/deepseek-v4-flash", registry);
-      expect(result.valid).toBe(true);
-      expect(result.modelInfo?.providerId).toBe("deepseek");
-      expect(result.modelInfo?.modelId).toBe("deepseek-v4-flash");
-      expect(result.modelInfo?.harnessOverride).toBe("pi");
-    });
-  });
-
-  describe("kimi-k3 routing to OpenRouter via pi shim", () => {
-    test("bare kimi-k3 resolves to moonshotai and routes via openrouter at dispatch", () => {
-      const result = validateModel("kimi-k3", registry);
-      expect(result.valid).toBe(true);
-      expect(result.modelInfo?.providerId).toBe("moonshotai");
-      expect(result.modelInfo?.modelId).toBe("kimi-k3");
-      expect(piRouteOf(result.modelInfo)).toBe("openrouter/moonshotai/kimi-k3");
-    });
-
-    test("moonshotai/kimi-k3 resolves to moonshotai and routes via openrouter", () => {
-      const result = validateModel("moonshotai/kimi-k3", registry);
-      expect(result.valid).toBe(true);
-      expect(result.modelInfo?.providerId).toBe("moonshotai");
-      expect(piRouteOf(result.modelInfo)).toBe("openrouter/moonshotai/kimi-k3");
-    });
-
-    test("kimi-k3 resolution is case-insensitive", () => {
-      const result = validateModel("Kimi-K3", registry);
-      expect(result.valid).toBe(true);
-      expect(piRouteOf(result.modelInfo)).toBe("openrouter/moonshotai/kimi-k3");
-    });
-
-    test("an explicit pi/openrouter kimi spelling keeps openrouter as the provider", () => {
-      const result = validateModel("pi/openrouter/moonshotai/kimi-k3", registry);
-      expect(result.valid).toBe(true);
-      expect(result.modelInfo?.providerId).toBe("openrouter");
-      expect(result.modelInfo?.modelId).toBe("moonshotai/kimi-k3");
-      expect(result.modelInfo?.harnessOverride).toBe("pi");
-      expect(piRouteOf(result.modelInfo)).toBe("openrouter/moonshotai/kimi-k3");
-    });
-  });
-
-  describe("openrouter → pi passthrough routing", () => {
-    test("openrouter/<org>/<model> keeps openrouter as the provider and forces pi", () => {
-      const result = validateModel("openrouter/poolside/laguna-s-2.1", registry);
-      expect(result.valid).toBe(true);
-      expect(result.modelInfo?.providerId).toBe("openrouter");
-      expect(result.modelInfo?.modelId).toBe("poolside/laguna-s-2.1");
-      expect(result.modelInfo?.harnessOverride).toBe("pi");
-      expect(piRouteOf(result.modelInfo)).toBe("openrouter/poolside/laguna-s-2.1");
-    });
-
-    test("an openrouter model not in the registry still routes via pi", () => {
-      const result = validateModel("openrouter/some-org/not-a-real-model-xyz", registry);
-      expect(result.valid).toBe(true);
-      expect(result.modelInfo?.providerId).toBe("openrouter");
-      expect(result.modelInfo?.modelId).toBe("some-org/not-a-real-model-xyz");
-      expect(result.modelInfo?.harnessOverride).toBe("pi");
-    });
-
-    test("the openrouter prefix is matched case-insensitively", () => {
-      const result = validateModel("OpenRouter/poolside/laguna-s-2.1", registry);
-      expect(result.valid).toBe(true);
-      expect(result.modelInfo?.providerId).toBe("openrouter");
-      expect(result.modelInfo?.modelId).toBe("poolside/laguna-s-2.1");
-    });
-
-    test("the model id after the prefix keeps its case (pi forwards it verbatim)", () => {
-      const result = validateModel("openrouter/Some-Org/Mixed-Case-Model", registry);
-      expect(result.valid).toBe(true);
-      expect(result.modelInfo?.modelId).toBe("Some-Org/Mixed-Case-Model");
-      expect(piRouteOf(result.modelInfo)).toBe("openrouter/Some-Org/Mixed-Case-Model");
-    });
-
-    test("an explicit pi/openrouter spelling is left untouched (no double prefix)", () => {
-      const result = validateModel("pi/openrouter/poolside/laguna-s-2.1", registry);
-      expect(result.valid).toBe(true);
-      expect(result.modelInfo?.providerId).toBe("openrouter");
-      expect(result.modelInfo?.modelId).toBe("poolside/laguna-s-2.1");
-      expect(piRouteOf(result.modelInfo)).toBe("openrouter/poolside/laguna-s-2.1");
-    });
-
-    test("a registry model whose provider is openrouter keeps real capabilities", () => {
-      const underlying = registry.resolveModel({
-        model: "openrouter/poolside/laguna-s-2.1",
-        ignoreBlockList: true,
-      });
-      expect(underlying.success).toBe(true);
-      if (!underlying.success) return;
-
-      const result = validateModel("openrouter/poolside/laguna-s-2.1", registry);
-      expect(result.valid).toBe(true);
-      if (!result.modelInfo) return;
-      // Real registry capabilities/cost survive, not the generic defaults.
-      expect(result.modelInfo.limit).toEqual(underlying.modelInfo.limit);
-      expect(result.modelInfo.cost).toEqual(underlying.modelInfo.cost);
-    });
-
-    test("bare 'openrouter' is treated as a model name, not a provider qualifier", () => {
-      // No remainder to route — must not become an "openrouter/" identity.
-      const result = validateModel("openrouter", registry);
-      expect(result.modelInfo?.modelId).not.toBe("openrouter/");
-    });
-
-    test("the kimi rewrite still lands on its canonical openrouter route", () => {
-      // Guards the rewrite ordering: kimi resolves to moonshotai, whose
-      // dispatch-time route is openrouter-prefixed exactly once.
-      const result = validateModel("kimi-k3", registry);
-      expect(piRouteOf(result.modelInfo)).toBe("openrouter/moonshotai/kimi-k3");
-    });
-
-    test("opencode/openrouter/<model> still lands on a single openrouter prefix", () => {
-      const result = validateModel("opencode/openrouter/poolside/laguna-s-2.1", registry);
-      expect(result.valid).toBe(true);
-      expect(result.modelInfo?.providerId).toBe("openrouter");
-      expect(result.modelInfo?.modelId).toBe("poolside/laguna-s-2.1");
-      expect(piRouteOf(result.modelInfo)).toBe("openrouter/poolside/laguna-s-2.1");
-    });
-  });
-
-  describe("passthrough ModelInfo defaults", () => {
-    test("passthrough ModelInfo has expected default fields", () => {
-      const result = validateModel("pi/some-provider/some-model", registry);
-      expect(result.valid).toBe(true);
-      expect(result.modelInfo).toBeDefined();
-      if (!result.modelInfo) return; // type guard for TS
-      expect(result.modelInfo.tool_call).toBe(true);
-      expect(result.modelInfo.reasoning).toBe(true);
-      expect(result.modelInfo.limit.context).toBe(200000);
-      expect(result.modelInfo.limit.output).toBe(64000);
-      expect(result.modelInfo.cost).toBeUndefined();
-      expect(result.modelInfo.modalities.input).toContain("text");
-      expect(result.modelInfo.modalities.output).toContain("text");
-    });
-
-    test("a registry-known passthrough keeps the real display name (no pi: prefix)", () => {
-      const result = validateModel("pi/google/gemini-2.5-flash", registry);
-      expect(result.modelInfo?.name).toBeDefined();
-      expect(result.modelInfo?.name?.startsWith("pi:")).toBe(false);
-      expect(result.modelInfo?.providerId).toBe("google");
-    });
-  });
-
-  describe("registry-resolved passthrough ModelInfo", () => {
-    test("passthrough with known registry model inherits real capabilities", () => {
-      // Resolve the underlying model directly from the registry
-      const underlying = registry.resolveModel({
-        model: "google/gemini-2.5-flash",
-        ignoreBlockList: true,
-      });
-      expect(underlying.success).toBe(true);
-      if (!underlying.success) return;
-
-      // Now resolve via passthrough
-      const result = validateModel("pi/google/gemini-2.5-flash", registry);
-      expect(result.valid).toBe(true);
-      expect(result.modelInfo).toBeDefined();
-      if (!result.modelInfo) return;
-
-      // Should use real registry values, not hardcoded defaults
-      expect(result.modelInfo.limit).toEqual(underlying.modelInfo.limit);
-      expect(result.modelInfo.modalities).toEqual(underlying.modelInfo.modalities);
-      expect(result.modelInfo.reasoning).toBe(underlying.modelInfo.reasoning);
-      expect(result.modelInfo.tool_call).toBe(underlying.modelInfo.tool_call);
-      expect(result.modelInfo.cost).toEqual(underlying.modelInfo.cost);
-      expect(result.modelInfo.attachment).toBe(underlying.modelInfo.attachment);
-
-      // Identity stays real; only the harness override marks the pi routing.
-      expect(result.modelInfo.providerId).toBe("google");
-      expect(result.modelInfo.modelId).toBe("gemini-2.5-flash");
-      expect(result.modelInfo.harnessOverride).toBe("pi");
-    });
-
-    test("rewritten opencode passthrough with known registry model inherits real capabilities", () => {
-      const underlying = registry.resolveModel({
-        model: "anthropic/claude-haiku-4-5",
-        ignoreBlockList: true,
-      });
-      expect(underlying.success).toBe(true);
-      if (!underlying.success) return;
-
-      const result = validateModel("opencode/anthropic/claude-haiku-4-5", registry);
-      expect(result.valid).toBe(true);
-      if (!result.modelInfo) return;
-
-      expect(result.modelInfo.limit).toEqual(underlying.modelInfo.limit);
-      expect(result.modelInfo.modalities).toEqual(underlying.modelInfo.modalities);
-      expect(result.modelInfo.cost).toEqual(underlying.modelInfo.cost);
-      expect(result.modelInfo.providerId).toBe("anthropic");
-      expect(result.modelInfo.harnessOverride).toBe("pi");
-    });
-
-    test("passthrough with unknown model falls back to hardcoded defaults", () => {
-      const result = validateModel("pi/fake/unknown-model-xyz", registry);
-      expect(result.valid).toBe(true);
-      if (!result.modelInfo) return;
-
-      expect(result.modelInfo.limit).toEqual({ context: 200000, output: 64000 });
-      expect(result.modelInfo.modalities).toEqual({ input: ["text"], output: ["text"] });
-      expect(result.modelInfo.reasoning).toBe(true);
-      expect(result.modelInfo.tool_call).toBe(true);
-      expect(result.modelInfo.cost).toBeUndefined();
-    });
-  });
-
-  describe("google/openai registry models keep their real provider (pi at dispatch)", () => {
-    test("google/gemini-2.5-flash resolves via registry with its real provider", () => {
-      const result = validateModel("google/gemini-2.5-flash", registry);
-      expect(result.valid).toBe(true);
-      expect(result.modelInfo?.providerId).toBe("google");
-      expect(result.modelInfo?.harnessOverride).toBeUndefined();
-      if (result.modelInfo) expect(selectHarness(result.modelInfo)).toBe("pi");
-      // Underlying registry capabilities/cost are preserved
-      expect(result.modelInfo?.cost).toBeDefined();
-    });
-
-    test("bare gemini-2.5-flash resolves via registry to google", () => {
-      const result = validateModel("gemini-2.5-flash", registry);
-      expect(result.valid).toBe(true);
-      expect(result.modelInfo?.providerId).toBe("google");
-      if (result.modelInfo) expect(selectHarness(result.modelInfo)).toBe("pi");
-    });
-
-    test("bare gpt model resolves via registry to openai", () => {
-      const result = validateModel("gpt-5.2", registry);
-      expect(result.valid).toBe(true);
-      expect(result.modelInfo?.providerId).toBe("openai");
-      if (result.modelInfo) expect(selectHarness(result.modelInfo)).toBe("pi");
-    });
-
-    test("anthropic models stay on the agent-sdk harness", () => {
-      const result = validateModel("anthropic/claude-haiku-4-5", registry);
-      if (result.valid) {
-        expect(result.modelInfo?.providerId).toBe("anthropic");
-        if (result.modelInfo) expect(selectHarness(result.modelInfo)).toBe("claude-agent-sdk");
-      }
-    });
-  });
-
-  describe("deepseek registry models run on pi with their real provider", () => {
-    // The pi runtime supports deepseek natively (it resolves DEEPSEEK_API_KEY
-    // itself), so deepseek-provider registry models must route to pi at
-    // dispatch — not fail with "provider not supported".
-    test("bare deepseek-v4-pro resolves via registry to deepseek", () => {
-      const result = validateModel("deepseek-v4-pro", registry);
-      expect(result.valid).toBe(true);
-      expect(result.modelInfo?.providerId).toBe("deepseek");
-      expect(result.modelInfo?.modelId).toBe("deepseek-v4-pro");
-      if (result.modelInfo) expect(selectHarness(result.modelInfo)).toBe("pi");
-      // Underlying registry capabilities/cost are preserved
-      expect(result.modelInfo?.cost).toBeDefined();
-    });
-
-    test("deepseek/deepseek-v4-pro resolves via registry", () => {
-      const result = validateModel("deepseek/deepseek-v4-pro", registry);
-      expect(result.valid).toBe(true);
-      expect(result.modelInfo?.providerId).toBe("deepseek");
-      expect(result.modelInfo?.modelId).toBe("deepseek-v4-pro");
-    });
-
-    test("pi/deepseek-v4-pro qualifies the bare id with its provider", () => {
-      // A bare id after "pi/" gets its provider from the registry: the pi
-      // runtime routes "provider/model" strings, and defaults bare
-      // non-gemini/gpt ids to anthropic — so "deepseek-v4-pro" alone would
-      // target the wrong provider at runtime.
-      const result = validateModel("pi/deepseek-v4-pro", registry);
-      expect(result.valid).toBe(true);
-      expect(result.modelInfo?.providerId).toBe("deepseek");
-      expect(result.modelInfo?.modelId).toBe("deepseek-v4-pro");
-      expect(result.modelInfo?.harnessOverride).toBe("pi");
-      expect(piRouteOf(result.modelInfo)).toBe("deepseek/deepseek-v4-pro");
-    });
-  });
-
-  describe("general non-anthropic providers run on pi", () => {
-    test("groq model validates with its real provider (was previously rejected)", () => {
-      const result = validateModel("groq/llama-3.3-70b-versatile", registry);
-      expect(result.valid).toBe(true);
-      expect(result.modelInfo?.providerId).toBe("groq");
-      expect(result.modelInfo?.modelId).toBe("llama-3.3-70b-versatile");
-      if (result.modelInfo) expect(selectHarness(result.modelInfo)).toBe("pi");
-    });
-
-    test("xai model validates with its real provider", () => {
-      const result = validateModel("xai/grok-4.5", registry);
-      expect(result.valid).toBe(true);
-      expect(result.modelInfo?.providerId).toBe("xai");
-      expect(result.modelInfo?.modelId).toBe("grok-4.5");
-      if (result.modelInfo) expect(selectHarness(result.modelInfo)).toBe("pi");
-    });
-
-    test("all moonshotai models route through openrouter, not just kimi-k3", () => {
-      const result = validateModel("moonshotai/kimi-k2.6", registry);
-      expect(result.valid).toBe(true);
-      expect(result.modelInfo?.providerId).toBe("moonshotai");
-      expect(piRouteOf(result.modelInfo)).toBe("openrouter/moonshotai/kimi-k2.6");
-    });
-  });
-
-  describe("invalid passthrough cases", () => {
-    test("unknown prefix doesn't match passthrough", () => {
-      const result = validateModel("fakeagent/some-model", registry);
-      // Should NOT be valid (fakeagent is not a pass-through shim provider and not in registry)
-      // It might fuzzy-match to something in the registry, but the providerId won't be "fakeagent"
-      if (result.valid && result.modelInfo) {
-        expect(result.modelInfo.providerId).not.toBe("fakeagent");
-      }
-    });
-
-    test("passthrough requires at least one slash", () => {
-      // "pi" alone is not a passthrough — it's a bare model name
-      const result = validateModel("pi", registry);
-      // This would try registry resolution for "opencode" as a model name
-      // The passthrough code only triggers when there's a "/"
-      // It may or may not find something — the key test is it doesn't crash
-      expect(result).toBeDefined();
-    });
-  });
-
-  describe("case insensitivity", () => {
-    test("OPENCODE/google/gemini-2.5-flash rewrites (case insensitive prefix)", () => {
-      const result = validateModel("OPENCODE/google/gemini-2.5-flash", registry);
-      expect(result.valid).toBe(true);
-      expect(result.modelInfo?.providerId).toBe("google");
-      expect(result.modelInfo?.harnessOverride).toBe("pi");
-    });
-
-    test("Pi/anthropic/claude-haiku-4-5 resolves (mixed case)", () => {
-      const result = validateModel("Pi/anthropic/claude-haiku-4-5", registry);
-      expect(result.valid).toBe(true);
-      expect(result.modelInfo?.providerId).toBe("anthropic");
-      expect(result.modelInfo?.harnessOverride).toBe("pi");
-    });
-  });
-});
-
 describe("normalizeLegacyProviderModelInfo", () => {
-  test("legacy pi encoding reverse-maps to the real provider", () => {
+  test("legacy pi encoding splits into the real provider", () => {
     const normalized = normalizeLegacyProviderModelInfo(
       makeModelInfo("pi", "google/gemini-2.5-pro"),
     );
@@ -470,7 +71,6 @@ describe("normalizeLegacyProviderModelInfo", () => {
     );
     expect(normalized.providerId).toBe("openrouter");
     expect(normalized.modelId).toBe("moonshotai/kimi-k3");
-    // Dispatch re-derives the same route (and the same pricing key as before).
     expect(toPiTarget(normalized.providerId, normalized.modelId)).toBe(
       "openrouter/moonshotai/kimi-k3",
     );
@@ -487,7 +87,7 @@ describe("normalizeLegacyProviderModelInfo", () => {
     expect(selectHarness(normalized)).toBe("claude-agent-sdk");
   });
 
-  test("legacy opencode passthrough model reverse-maps to the real provider", () => {
+  test("legacy opencode qualified model splits into the real provider", () => {
     const normalized = normalizeLegacyProviderModelInfo(
       makeModelInfo("opencode", "deepseek/deepseek-chat"),
     );
@@ -495,46 +95,52 @@ describe("normalizeLegacyProviderModelInfo", () => {
     expect(normalized.modelId).toBe("deepseek-chat");
   });
 
-  test("legacy opencode GLM shorthand lands on the canonical zai pi route", () => {
-    const normalized = normalizeLegacyProviderModelInfo(
-      makeModelInfo("opencode", "glm-5.2"),
-      registry,
-    );
-    expect(toPiTarget(normalized.providerId, normalized.modelId)).toBe("zai/glm-5.2");
+  test("legacy opencode bare id keeps its raw shape and runs on Pi's OpenCode Zen", () => {
+    const persisted = makeModelInfo("opencode", "glm-5.2");
+    const normalized = normalizeLegacyProviderModelInfo(persisted);
+    expect(normalized).toBe(persisted);
+    // No zhipuai/zai inference: "opencode" is a real Pi provider now.
     expect(selectHarness(normalized)).toBe("pi");
+    expect(toPiTarget(normalized.providerId, normalized.modelId)).toBe("opencode/glm-5.2");
   });
 
-  test("legacy opencode bare id without a registry keeps the raw id", () => {
-    const normalized = normalizeLegacyProviderModelInfo(makeModelInfo("opencode", "glm-5.2"));
-    expect(normalized.modelId).toBe("glm-5.2");
+  test("legacy pi bare id keeps its raw shape and no harness runs it", () => {
+    const persisted = makeModelInfo("pi", "deepseek-v4-pro");
+    const normalized = normalizeLegacyProviderModelInfo(persisted);
+    expect(normalized).toBe(persisted);
+    expect(selectHarness(normalized)).toBeUndefined();
+    expect(CodonRunner.canRun(normalized)).toBe(false);
   });
 
-  test("legacy deepseek providerId is already real and stays unchanged", () => {
-    const modelInfo = makeModelInfo("deepseek", "deepseek-v4-pro");
-    expect(normalizeLegacyProviderModelInfo(modelInfo)).toBe(modelInfo);
-    expect(selectHarness(modelInfo)).toBe("pi");
+  test("already-real providers are returned unchanged", () => {
+    for (const [provider, id] of [
+      ["deepseek", "deepseek-v4-pro"],
+      ["google", "gemini-2.5-pro"],
+      ["openrouter", "poolside/laguna-s-2.1"],
+      ["anthropic", "claude-sonnet-4-6"],
+    ] as const) {
+      const modelInfo = makeModelInfo(provider, id);
+      expect(normalizeLegacyProviderModelInfo(modelInfo)).toBe(modelInfo);
+    }
   });
 
-  test("legacy google providerId is already real and stays unchanged", () => {
-    const modelInfo = makeModelInfo("google", "gemini-2.5-pro");
-    expect(normalizeLegacyProviderModelInfo(modelInfo)).toBe(modelInfo);
-    expect(selectHarness(modelInfo)).toBe("pi");
+  test("matches 'PI' and 'OpenCode' in any case and lowercases the split provider", () => {
+    // Earlier versions matched these case-insensitively and stored the split
+    // provider lowercased; the model id keeps its case.
+    for (const legacy of ["PI", "Pi", "OpenCode", "OPENCODE"]) {
+      const normalized = normalizeLegacyProviderModelInfo(
+        makeModelInfo(legacy, "DeepSeek/DeepSeek-V4-Pro"),
+      );
+      expect(normalized.providerId).toBe("deepseek");
+      expect(normalized.modelId).toBe("DeepSeek-V4-Pro");
+      expect(normalized.name).toBe("DeepSeek/DeepSeek-V4-Pro");
+    }
+    // A bare id under an upper-case legacy provider still keeps its raw shape.
+    const bare = makeModelInfo("PI", "deepseek-v4-pro");
+    expect(normalizeLegacyProviderModelInfo(bare)).toBe(bare);
   });
 
-  test("an openrouter providerId is already real and stays unchanged", () => {
-    const modelInfo = makeModelInfo("openrouter", "poolside/laguna-s-2.1");
-    expect(normalizeLegacyProviderModelInfo(modelInfo)).toBe(modelInfo);
-    expect(toPiTarget(modelInfo.providerId, modelInfo.modelId)).toBe(
-      "openrouter/poolside/laguna-s-2.1",
-    );
-  });
-
-  test("anthropic models are returned unchanged", () => {
-    const modelInfo = makeModelInfo("anthropic", "claude-sonnet-4-6");
-    expect(normalizeLegacyProviderModelInfo(modelInfo)).toBe(modelInfo);
-  });
-
-  test("underlying capabilities and cost survive the pi reverse-mapping", () => {
+  test("underlying capabilities and cost survive the pi split", () => {
     const legacy = makeModelInfo("pi", "google/gemini-2.5-pro");
     legacy.cost = { input: 1.25, output: 10 } as ModelInfo["cost"];
     const normalized = normalizeLegacyProviderModelInfo(legacy);
@@ -543,20 +149,33 @@ describe("normalizeLegacyProviderModelInfo", () => {
   });
 });
 
-describe("Model Validator — CodonRunner.canRun and harness selection", () => {
-  const { CodonRunner } = require("../../server/codon-runner");
-
+describe("CodonRunner.canRun and selectHarness", () => {
   test("canRun accepts anthropic (agent-sdk harness)", () => {
-    expect(CodonRunner.canRun({ providerId: "anthropic", modelId: "claude-sonnet-4-6" })).toBe(
-      true,
-    );
+    expect(CodonRunner.canRun(makeModelInfo("anthropic", "claude-sonnet-4-6"))).toBe(true);
   });
 
-  test("canRun accepts real non-anthropic providers (pi harness at dispatch)", () => {
-    expect(CodonRunner.canRun({ providerId: "google", modelId: "gemini-2.5-pro" })).toBe(true);
-    expect(CodonRunner.canRun({ providerId: "openai", modelId: "gpt-5.2" })).toBe(true);
-    expect(CodonRunner.canRun({ providerId: "deepseek", modelId: "deepseek-v4-pro" })).toBe(true);
-    expect(CodonRunner.canRun({ providerId: "venice", modelId: "some-model" })).toBe(true);
+  test("canRun accepts providers Pi runs", () => {
+    for (const [provider, id] of [
+      ["google", "gemini-2.5-pro"],
+      ["openai", "gpt-5.2"],
+      ["deepseek", "deepseek-v4-pro"],
+      ["openai-codex", "gpt-5.6-sol"],
+      ["opencode", "claude-haiku-4-5"],
+      ["moonshotai", "kimi-k3"],
+    ] as const) {
+      expect({ provider, canRun: CodonRunner.canRun(makeModelInfo(provider, id)) }).toEqual({
+        provider,
+        canRun: true,
+      });
+    }
+  });
+
+  test("canRun refuses a provider no harness runs", () => {
+    for (const provider of ["zhipuai", "deepinfra", "pi"]) {
+      const model = makeModelInfo(provider, "some-model");
+      expect(selectHarness(model)).toBeUndefined();
+      expect(CodonRunner.canRun(model)).toBe(false);
+    }
   });
 
   test("selectHarness routes non-anthropic providers to pi", () => {
@@ -565,7 +184,7 @@ describe("Model Validator — CodonRunner.canRun and harness selection", () => {
     expect(selectHarness({ providerId: "deepseek", modelId: "deepseek-v4-pro" })).toBe("pi");
   });
 
-  test("selectHarness routes anthropic to the agent-sdk unless overridden", () => {
+  test("selectHarness routes anthropic to the agent-sdk unless pi is forced", () => {
     expect(selectHarness({ providerId: "anthropic", modelId: "claude-sonnet-4-6" })).toBe(
       "claude-agent-sdk",
     );
@@ -577,86 +196,125 @@ describe("Model Validator — CodonRunner.canRun and harness selection", () => {
       }),
     ).toBe("pi");
   });
+
+  test("provider names are case-sensitive at dispatch too", () => {
+    expect(
+      selectHarness({ providerId: "Anthropic", modelId: "claude-sonnet-4-6" }),
+    ).toBeUndefined();
+  });
 });
 
-describe("Model Validator — Amazon Bedrock routing", () => {
+describe("Amazon Bedrock routing", () => {
   const BEDROCK_HAIKU = "us.anthropic.claude-haiku-4-5-20251001-v1:0";
   const BEDROCK_DEEPSEEK = "us.deepseek.r1-v1:0";
-
-  test("Anthropic-on-Bedrock stays on the Agent SDK (provider amazon-bedrock)", () => {
-    const result = validateModel(`amazon-bedrock/${BEDROCK_HAIKU}`, registry);
-    expect(result.valid).toBe(true);
-    expect(result.modelInfo?.providerId).toBe("amazon-bedrock");
-    expect(result.modelInfo?.modelId).toBe(BEDROCK_HAIKU);
-    if (result.modelInfo) expect(selectHarness(result.modelInfo)).toBe("claude-agent-sdk");
-  });
-
-  test("Anthropic-on-Bedrock carries registry cost through for the tracker", () => {
-    const result = validateModel(`amazon-bedrock/${BEDROCK_HAIKU}`, registry);
-    expect(result.valid).toBe(true);
-    // CostTracker prices every model by "<providerId>/<modelId>", which must
-    // match the registry's amazon-bedrock index entry.
-    expect(result.modelInfo?.cost?.input).toBe(1);
-    expect(result.modelInfo?.cost?.output).toBe(5);
-  });
-
-  test("explicit pi/ prefix overrides Anthropic-on-Bedrock onto pi", () => {
-    const result = validateModel(`pi/amazon-bedrock/${BEDROCK_HAIKU}`, registry);
-    expect(result.valid).toBe(true);
-    expect(result.modelInfo?.providerId).toBe("amazon-bedrock");
-    expect(result.modelInfo?.modelId).toBe(BEDROCK_HAIKU);
-    expect(result.modelInfo?.harnessOverride).toBe("pi");
-    if (result.modelInfo) expect(selectHarness(result.modelInfo)).toBe("pi");
-    expect(piRouteOf(result.modelInfo)).toBe(`amazon-bedrock/${BEDROCK_HAIKU}`);
-  });
-
-  test("non-Anthropic Bedrock models keep their real provider and route to pi", () => {
-    const result = validateModel(`amazon-bedrock/${BEDROCK_DEEPSEEK}`, registry);
-    expect(result.valid).toBe(true);
-    expect(result.modelInfo?.providerId).toBe("amazon-bedrock");
-    expect(result.modelInfo?.modelId).toBe(BEDROCK_DEEPSEEK);
-    if (result.modelInfo) expect(selectHarness(result.modelInfo)).toBe("pi");
-    expect(piRouteOf(result.modelInfo)).toBe(`amazon-bedrock/${BEDROCK_DEEPSEEK}`);
-  });
 
   test("selectHarness splits amazon-bedrock by model family", () => {
     expect(selectHarness({ providerId: "amazon-bedrock", modelId: BEDROCK_HAIKU })).toBe(
       "claude-agent-sdk",
     );
+    expect(
+      selectHarness({ providerId: "amazon-bedrock", modelId: "anthropic.claude-haiku-4-5-v1:0" }),
+    ).toBe("claude-agent-sdk");
+    expect(
+      selectHarness({
+        providerId: "amazon-bedrock",
+        modelId: "global.anthropic.claude-opus-4-6-v1",
+      }),
+    ).toBe("claude-agent-sdk");
     expect(selectHarness({ providerId: "amazon-bedrock", modelId: BEDROCK_DEEPSEEK })).toBe("pi");
   });
 
-  test("persisted Anthropic-on-Bedrock plans survive resume un-wrapped", () => {
-    const persisted = makeModelInfo("amazon-bedrock", BEDROCK_HAIKU);
-    const normalized = normalizeLegacyProviderModelInfo(persisted, registry);
-    expect(normalized.providerId).toBe("amazon-bedrock");
-    expect(normalized.modelId).toBe(BEDROCK_HAIKU);
+  test("Anthropic-on-Bedrock resolves under amazon-bedrock and stays on the Agent SDK", () => {
+    const model = resolve(`amazon-bedrock/${BEDROCK_HAIKU}`);
+    expect(model.providerId).toBe("amazon-bedrock");
+    expect(model.modelId).toBe(BEDROCK_HAIKU);
+    expect(selectHarness(model)).toBe("claude-agent-sdk");
+    // CostTracker prices every model by "<providerId>/<modelId>".
+    expect(model.cost?.input).toBe(1.1);
+    expect(model.cost?.output).toBe(5.5);
   });
 
-  test("persisted non-Anthropic Bedrock plans stay real and route to pi", () => {
-    const persisted = makeModelInfo("amazon-bedrock", BEDROCK_DEEPSEEK);
-    const normalized = normalizeLegacyProviderModelInfo(persisted, registry);
-    expect(normalized.providerId).toBe("amazon-bedrock");
-    expect(normalized.modelId).toBe(BEDROCK_DEEPSEEK);
-    expect(selectHarness(normalized)).toBe("pi");
+  test("an explicit pi/ prefix forces Anthropic-on-Bedrock onto pi", () => {
+    const model = resolve(`pi/amazon-bedrock/${BEDROCK_HAIKU}`);
+    expect(model.providerId).toBe("amazon-bedrock");
+    expect(model.modelId).toBe(BEDROCK_HAIKU);
+    expect(model.harnessOverride).toBe("pi");
+    expect(selectHarness(model)).toBe("pi");
+    expect(toPiTarget(model.providerId, model.modelId)).toBe(`amazon-bedrock/${BEDROCK_HAIKU}`);
   });
 
-  test("old-encoding non-Anthropic Bedrock plans reverse-map and route to pi", () => {
-    const persisted = makeModelInfo("pi", `amazon-bedrock/${BEDROCK_DEEPSEEK}`);
-    const normalized = normalizeLegacyProviderModelInfo(persisted, registry);
-    expect(normalized.providerId).toBe("amazon-bedrock");
-    expect(normalized.modelId).toBe(BEDROCK_DEEPSEEK);
-    expect(selectHarness(normalized)).toBe("pi");
-    expect(toPiTarget(normalized.providerId, normalized.modelId)).toBe(
-      `amazon-bedrock/${BEDROCK_DEEPSEEK}`,
+  test("non-Anthropic Bedrock models keep their real provider and route to pi", () => {
+    const model = resolve(`amazon-bedrock/${BEDROCK_DEEPSEEK}`);
+    expect(model.providerId).toBe("amazon-bedrock");
+    expect(model.modelId).toBe(BEDROCK_DEEPSEEK);
+    expect(selectHarness(model)).toBe("pi");
+  });
+
+  test("persisted Bedrock plans pass through unchanged", () => {
+    for (const id of [BEDROCK_HAIKU, BEDROCK_DEEPSEEK]) {
+      const persisted = makeModelInfo("amazon-bedrock", id);
+      expect(normalizeLegacyProviderModelInfo(persisted)).toBe(persisted);
+    }
+  });
+
+  test("old-encoding Bedrock plans split and route by family", () => {
+    const deepseek = normalizeLegacyProviderModelInfo(
+      makeModelInfo("pi", `amazon-bedrock/${BEDROCK_DEEPSEEK}`),
+    );
+    expect(deepseek.providerId).toBe("amazon-bedrock");
+    expect(deepseek.modelId).toBe(BEDROCK_DEEPSEEK);
+    expect(selectHarness(deepseek)).toBe("pi");
+
+    const haiku = normalizeLegacyProviderModelInfo(
+      makeModelInfo("pi", `amazon-bedrock/${BEDROCK_HAIKU}`),
+    );
+    expect(haiku.providerId).toBe("amazon-bedrock");
+    expect(haiku.modelId).toBe(BEDROCK_HAIKU);
+    expect(selectHarness(haiku)).toBe("claude-agent-sdk");
+  });
+});
+
+describe("persisted ModelInfo schema", () => {
+  const persisted = (provenance: Record<string, unknown>) => ({
+    ...makeModelInfo("anthropic", "claude-sonnet-4-5"),
+    provenance: { source: "models.dev snapshot 2026-06-01", priceStatus: "known", ...provenance },
+  });
+
+  test.each(["shortcut", "alias", "exact-with-inferred-provider", "exact"])(
+    "a plan persisted with matchType '%s' still parses",
+    (matchType) => {
+      const parsed = modelInfoSchema.safeParse(
+        persisted({ confidence: "registry", requestedAs: "sonnet", matchType }),
+      );
+      expect(parsed.success).toBe(true);
+      expect(parsed.data?.provenance?.matchType).toBe(matchType);
+    },
+  );
+
+  test("a plan persisted with confidence 'unverified' still parses", () => {
+    const parsed = modelInfoSchema.safeParse(
+      persisted({ confidence: "unverified", requestedAs: "pi/foo/bar", matchType: "exact" }),
+    );
+    expect(parsed.success).toBe(true);
+    expect(parsed.data?.provenance?.confidence).toBe("unverified");
+  });
+
+  test("the new 'harness' confidence and evidence parse", () => {
+    const parsed = modelInfoSchema.safeParse(
+      persisted({ confidence: "harness", matchType: "exact", evidence: "pi catalog" }),
+    );
+    expect(parsed.success).toBe(true);
+    expect(parsed.data?.provenance?.evidence).toBe("pi catalog");
+  });
+
+  test("a plan persisted before provenance existed still parses", () => {
+    expect(modelInfoSchema.safeParse(makeModelInfo("anthropic", "claude-sonnet-4-5")).success).toBe(
+      true,
     );
   });
 
-  test("old-encoding Anthropic-on-Bedrock plans resume onto the Agent SDK", () => {
-    const persisted = makeModelInfo("pi", `amazon-bedrock/${BEDROCK_HAIKU}`);
-    const normalized = normalizeLegacyProviderModelInfo(persisted, registry);
-    expect(normalized.providerId).toBe("amazon-bedrock");
-    expect(normalized.modelId).toBe(BEDROCK_HAIKU);
-    expect(selectHarness(normalized)).toBe("claude-agent-sdk");
+  test("a record Models resolves today round-trips through the schema", () => {
+    const model = resolve("anthropic/claude-haiku-4-5");
+    expect(modelInfoSchema.parse(JSON.parse(JSON.stringify(model)))).toEqual(model);
   });
 });

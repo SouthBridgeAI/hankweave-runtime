@@ -1,8 +1,8 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { LlmProviderRegistry } from "../../server/llm/llm-provider-registry.js";
 import type { ServerEvent } from "../../server/schemas/event-schemas.js";
+import type { ProviderHealth } from "../../server/sentinels/provider-health.js";
 import {
   SentinelManager,
   type SentinelManagerOptions,
@@ -30,7 +30,7 @@ export function createTestSentinelManager(
   const { providerRegistry, ...rest } = overrides;
   return new SentinelManager({
     enablePersistence: false,
-    providerRegistry: (providerRegistry ?? createMockLlmProviderRegistry()) as LlmProviderRegistry,
+    providerRegistry: (providerRegistry ?? createMockLlmProviderRegistry()) as ProviderHealth,
     ...rest,
   });
 }

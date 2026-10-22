@@ -14,6 +14,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import { ExecutionLayout } from "../../server/execution-layout.js";
 import type { ServerReadyEvent } from "../../server/schemas/event-schemas.js";
 import { launchHankweave } from "../utils/hankweave-server-test-helpers.js";
 import {
@@ -91,6 +92,9 @@ describe("ENG-198: Resume auto-managed executions", () => {
 
     try {
       await firstServer.waitForEvent("server.ready", 30_000);
+      expect(fs.statSync(new ExecutionLayout(normalExecDir).runtimeLockPath).isDirectory()).toBe(
+        true,
+      );
       // The copy below is only a valid execution once metadata is on disk, so
       // wait for the file the next step asserts on.
       await waitForCondition(() =>
@@ -99,6 +103,7 @@ describe("ENG-198: Resume auto-managed executions", () => {
     } finally {
       await firstServer.stop();
     }
+    expect(fs.existsSync(new ExecutionLayout(normalExecDir).runtimeLockPath)).toBe(false);
 
     // Step 2: Verify the execution has valid metadata
     const sourceMetaPath = path.join(normalExecDir, ".hankweave", "execution-meta.json");
@@ -108,10 +113,6 @@ describe("ENG-198: Resume auto-managed executions", () => {
     const managedExecDir = path.join(MANAGED_EXEC_BASE, `${TEST_PREFIX}resume-${testTimestamp}`);
     managedDirsToCleanup.push(managedExecDir);
     fs.cpSync(normalExecDir, managedExecDir, { recursive: true });
-
-    // Remove stale lock file from copy (simulates clean stop)
-    const lockPath = path.join(managedExecDir, ".hankweave", "runtime.lock");
-    if (fs.existsSync(lockPath)) fs.unlinkSync(lockPath);
 
     // Verify meta exists at destination
     const destMetaPath = path.join(managedExecDir, ".hankweave", "execution-meta.json");
@@ -203,6 +204,9 @@ describe("ENG-198: Resume auto-managed executions", () => {
 
     try {
       await firstServer.waitForEvent("server.ready", 30_000);
+      expect(fs.statSync(new ExecutionLayout(normalExecDir).runtimeLockPath).isDirectory()).toBe(
+        true,
+      );
       // The managed-space copy below needs the execution metadata on disk.
       await waitForCondition(() =>
         fs.existsSync(path.join(normalExecDir, ".hankweave", "execution-meta.json")),
@@ -210,14 +214,12 @@ describe("ENG-198: Resume auto-managed executions", () => {
     } finally {
       await firstServer.stop();
     }
+    expect(fs.existsSync(new ExecutionLayout(normalExecDir).runtimeLockPath)).toBe(false);
 
     // Step 2: Copy into managed space
     const managedExecDir = path.join(MANAGED_EXEC_BASE, `${TEST_PREFIX}startnew-${testTimestamp}`);
     managedDirsToCleanup.push(managedExecDir);
     fs.cpSync(normalExecDir, managedExecDir, { recursive: true });
-
-    const lockPath = path.join(managedExecDir, ".hankweave", "runtime.lock");
-    if (fs.existsSync(lockPath)) fs.unlinkSync(lockPath);
 
     // Step 3: Launch with --start-new --force in managed space
     const freshServer = await launchHankweave({

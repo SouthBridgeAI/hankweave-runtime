@@ -1,6 +1,8 @@
 #!/usr/bin/env bun
 import { describe, expect, it } from "bun:test";
+import fs from "node:fs";
 import * as path from "node:path";
+import { ExecutionLayout } from "../../server/execution-layout.js";
 import { CodonId } from "../../server/types/branded-types.js";
 import type {
   CodonCompletedEvent,
@@ -121,12 +123,15 @@ describe("hankweave server", () => {
         hankweave.process.exitCode !== null || hankweave.process.signalCode !== null,
       ).toBeTrue();
 
-      // SIGKILL leaves the lock file behind (asserted below), so the only thing
-      // left to wait on is the OS releasing the port for the relaunch.
+      // Wait for the OS to release the port before reusing it.
       await waitForPortFree(port);
 
       // lock file should be lingering after crash
       expect(hankweave.hasLockFile()).toBeTrue();
+
+      // The owner has exited. Simulate heartbeat expiry so recovery can reclaim
+      // the abandoned lease without waiting for the production stale timeout.
+      fs.utimesSync(new ExecutionLayout(execDir).runtimeLockPath, new Date(0), new Date(0));
 
       // relaunch the server and request previous events to capture rollback
       hankweave = await launchHankweave({
@@ -189,12 +194,15 @@ describe("hankweave server", () => {
         hankweave.process.exitCode !== null || hankweave.process.signalCode !== null,
       ).toBeTrue();
 
-      // SIGKILL leaves the lock file behind (asserted below), so the only thing
-      // left to wait on is the OS releasing the port for the relaunch.
+      // Wait for the OS to release the port before reusing it.
       await waitForPortFree(port);
 
       // Lock file should be lingering after crash
       expect(hankweave.hasLockFile()).toBeTrue();
+
+      // The owner has exited. Simulate heartbeat expiry so recovery can reclaim
+      // the abandoned lease without waiting for the production stale timeout.
+      fs.utimesSync(new ExecutionLayout(execDir).runtimeLockPath, new Date(0), new Date(0));
 
       // Resume with same execution directory
       hankweave = await launchHankweave({

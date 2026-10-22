@@ -3,7 +3,7 @@
     {
       "id": "failing-codon",
       "name": "This Will Fail (Ignored)",
-      "model": "haiku",
+      "model": "anthropic/claude-haiku-4-5",
       "continuationMode": "fresh",
       "promptText": "Intentionally fail by attempting an impossible operation",
       "onFailure": "ignore",
@@ -21,7 +21,7 @@
     {
       "id": "continuation-codon",
       "name": "Should Run After Failure",
-      "model": "haiku",
+      "model": "anthropic/claude-haiku-4-5",
       "continuationMode": "fresh",
       "promptText": "Write 'success' to output.txt",
       "checkpointedFiles": ["output.txt"]

@@ -26,7 +26,7 @@ describe("JSON Schema and Zod Parity", () => {
           {
             id: "test",
             name: "Test",
-            model: "sonnet",
+            model: "anthropic/claude-sonnet-4-6",
             continuationMode: "fresh",
             promptText: "test",
           },
@@ -37,12 +37,12 @@ describe("JSON Schema and Zod Parity", () => {
       name: "full config",
       config: {
         meta: { name: "Test Hank", version: "1.0.0", description: "A test" },
-        overrides: { model: "opus" },
+        overrides: { model: "anthropic/claude-opus-4-6" },
         hank: [
           {
             id: "codon-1",
             name: "First Codon",
-            model: "sonnet",
+            model: "anthropic/claude-sonnet-4-6",
             continuationMode: "fresh",
             promptFile: "./prompt.md",
           },
@@ -93,7 +93,7 @@ describe("Authoring schema consistency", () => {
       config: {
         id: "test",
         name: "Test",
-        model: "sonnet",
+        model: "anthropic/claude-sonnet-4-6",
         continuationMode: "fresh",
         promptText: "Hello",
       },
@@ -103,7 +103,7 @@ describe("Authoring schema consistency", () => {
       config: {
         id: "full",
         name: "Full Codon",
-        model: "haiku",
+        model: "anthropic/claude-haiku-4-5",
         continuationMode: "continue-previous",
         promptFile: "./prompt.md",
         description: "A full codon",
@@ -145,7 +145,7 @@ describe("Authoring schema consistency", () => {
         {
           id: "test",
           name: "Test",
-          model: "sonnet",
+          model: "anthropic/claude-sonnet-4-6",
           continuationMode: "fresh",
           promptText: "test",
         },
@@ -177,14 +177,14 @@ describe("Schema validates documentation examples", () => {
         description: "Generates documented schemas from raw CSV files",
       },
       overrides: {
-        model: "sonnet",
+        model: "anthropic/claude-sonnet-4-6",
         dataHashTimeLimit: 10000,
       },
       hank: [
         {
           id: "analyze",
           name: "Analyze Data",
-          model: "haiku",
+          model: "anthropic/claude-haiku-4-5",
           continuationMode: "fresh",
           promptFile: "./prompts/analyze.md",
           checkpointedFiles: ["analysis.md"],
@@ -198,7 +198,7 @@ describe("Schema validates documentation examples", () => {
             {
               id: "refine-codon",
               name: "Refine",
-              model: "sonnet",
+              model: "anthropic/claude-sonnet-4-6",
               continuationMode: "continue-previous",
               promptText: "Refine the previous analysis",
             },

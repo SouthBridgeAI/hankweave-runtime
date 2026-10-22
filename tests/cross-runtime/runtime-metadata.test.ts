@@ -7,7 +7,7 @@
  * Usage:
  *   bun tests/cross-runtime/runtime-metadata.test.ts
  *   npx tsx tests/cross-runtime/runtime-metadata.test.ts
- *   deno run -A --node-modules-dir --sloppy-imports tests/cross-runtime/runtime-metadata.test.ts
+ *   deno run -A --node-modules-dir=manual --sloppy-imports tests/cross-runtime/runtime-metadata.test.ts
  */
 
 import assert from "node:assert/strict";

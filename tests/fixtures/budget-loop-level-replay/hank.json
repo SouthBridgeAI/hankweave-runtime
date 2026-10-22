@@ -15,7 +15,7 @@
           "id": "loop-codon",
           "name": "Loop Codon",
           "promptText": "Create file iteration.txt with the current date and time. Then read the file back to verify.",
-          "model": "haiku",
+          "model": "anthropic/claude-haiku-4-5",
           "continuationMode": "fresh"
         }
       ]
@@ -24,7 +24,7 @@
       "id": "post-loop-codon",
       "name": "Post Loop Codon",
       "promptText": "Say exactly: loop finished",
-      "model": "haiku",
+      "model": "anthropic/claude-haiku-4-5",
       "continuationMode": "fresh"
     }
   ]
