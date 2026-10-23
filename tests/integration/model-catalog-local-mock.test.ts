@@ -374,6 +374,7 @@ describe("Models.load against local mocks of the catalog's network sources", () 
   beforeEach(() => {
     requests = [];
     maxProbesInFlight = 0;
+    catalogFetch.mockClear();
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), "hw-models-mock-"));
   });
 
@@ -479,6 +480,8 @@ describe("Models.load against local mocks of the catalog's network sources", () 
     expect(gateway.kind).toBe("unreachable");
     expect(gateway.message).toContain("HTTP 502");
     expect(gateway.message).toContain("'models' block");
+    // Both misses share one refresh of the missing models.dev cache before rejecting.
+    expect(catalogFetch).toHaveBeenCalledTimes(1);
   });
 
   test("makes no request with the network off", async () => {

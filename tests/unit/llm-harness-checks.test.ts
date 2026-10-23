@@ -816,7 +816,8 @@ describe("a Bedrock id on the Claude route", () => {
       `The model catalog does not list 'amazon-bedrock/${miss}'`,
     );
 
-    expect(requests).toEqual([]);
+    // The miss refreshes the missing models.dev cache once; nothing else is asked.
+    expect(requests.map((r) => r.url)).toEqual(["https://models.dev/api.json"]);
   });
 });
 

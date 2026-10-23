@@ -292,6 +292,7 @@ export class Models {
       probes: [],
     };
     await models.prepare(sources.occurrences, ctx);
+    await models.retryAfterCatalogRefresh(store, sources.user, ctx);
     if (models.recordProbes(store, sources.user, ctx.probes)) models.reenrich();
     if (options.background && network) models.startBackgroundRefresh(store);
     Models.install(models);
@@ -545,6 +546,50 @@ export class Models {
     }
     const confirmed = await Promise.all([...this.entries.values()].map((e) => this.stages(e, ctx)));
     for (const item of confirmed) if (item) this.enrich(item);
+  }
+
+  /**
+   * A model the harness does not know may be one models.dev listed after the
+   * cache was last refreshed. When the cache is missing or stale, refresh
+   * models.dev now (bounded) and check those spellings again: the background
+   * refresh lands too late for a run that fails validation, and --validate
+   * starts none.
+   */
+  private async retryAfterCatalogRefresh(
+    store: ModelCatalogStore,
+    user: Parameters<ModelCatalogStore["build"]>[0],
+    ctx: RunContext,
+  ): Promise<void> {
+    if (!ctx.network || !ctx.prerequisites) return;
+    const missed = this.harnessMisses();
+    if (missed.length === 0 || !(await this.refreshStaleModelsDev(store, ctx.timeoutMs))) return;
+    this.index = this.indexFor(store.build(user));
+    for (const entry of missed) this.results.delete(entry.key);
+    const confirmed = await Promise.all(missed.map((e) => this.stages(e, ctx)));
+    for (const item of confirmed) if (item) this.enrich(item);
+  }
+
+  /** Entries the harness rejected as a model it does not know (or could not ask about). */
+  private harnessMisses(): Entry[] {
+    return [...this.entries.values()].filter((entry) => {
+      const result = this.results.get(entry.key);
+      return (
+        result?.ok === false && (result.kind === "unknown-model" || result.kind === "unreachable")
+      );
+    });
+  }
+
+  /** Refresh a missing or stale models.dev cache now; whether it changed. */
+  private async refreshStaleModelsDev(
+    store: ModelCatalogStore,
+    timeoutMs: number,
+  ): Promise<boolean> {
+    if (!store.isStale("models.dev")) return false;
+    const [refreshed] = await store.refresh(["models.dev"], { timeoutMs });
+    if (refreshed.outcome === "failed") {
+      this.logger?.log(`Model catalog refresh: ${refreshed.detail}`, "info");
+    }
+    return refreshed.outcome === "updated";
   }
 
   /** Stages 0–2 for one entry; the confirmation, or undefined when it failed or needs no stage 3 now. */

@@ -190,7 +190,7 @@ describe("Models.load: stage ordering", () => {
     expect(targets()).toEqual(["anthropic/claude-haiku-4-5"]);
   });
 
-  it("does not adopt or refresh anything for a model the harness rejects and the catalog lacks", async () => {
+  it("does not adopt a model the harness rejects and a refreshed catalog still lacks", async () => {
     const adopt = mock(async () => ({ ok: true as const, evidence: "adopted" }));
     const fetchSpy = mock(async () => new Response("{}"));
     const models = await load(
@@ -225,7 +225,10 @@ describe("Models.load: stage ordering", () => {
     expect(result.message).toContain("deepseek/deepseek-v4-pro");
     expect(result.suggestions).toContain("deepseek/deepseek-v4-pro");
     expect(adopt).not.toHaveBeenCalled();
-    expect(fetchSpy).not.toHaveBeenCalled();
+    // The cache is missing, so models.dev is asked once; its useless answer changes nothing.
+    expect(fetchSpy.mock.calls.map((c) => String((c as unknown[])[0]))).toEqual([
+      "https://models.dev/api.json",
+    ]);
   });
 
   it("asks the harness about a casing its own offline catalog lists, though hankweave's has another", async () => {
@@ -942,6 +945,98 @@ describe("Models.load: adoption", () => {
     expect(model.provenance?.evidence).toBe(`adopted from deepseek/${siblings[0]?.modelId}`);
     expect(model.provenance?.confidence).toBe("user");
     expect(model.cost).toMatchObject({ input: 1, output: 2 });
+  });
+
+  describe("a model models.dev listed after the cache was refreshed", () => {
+    const body = {
+      deepseek: {
+        name: "DeepSeek",
+        models: {
+          "deepseek-v9-fresh": {
+            name: "DeepSeek V9 Fresh",
+            attachment: false,
+            reasoning: true,
+            tool_call: true,
+            release_date: "2026-10-20",
+            last_updated: "2026-10-20",
+            cost: { input: 0.5, output: 2 },
+            limit: { context: 1000000, output: 64000 },
+            modalities: { input: ["text"], output: ["text"] },
+          },
+        },
+      },
+    };
+    const adopter = (adopted: Set<string>) =>
+      mock(async (provider: string, modelId: string) => {
+        adopted.add(`${provider}/${modelId}`);
+        return { ok: true as const, evidence: "adopted from deepseek/deepseek-v4-pro" };
+      });
+    const cachePath = () => path.join(tmp, "catalog", "models-dev.json");
+    const options = (
+      adopt: ReturnType<typeof adopter>,
+      adopted: Set<string>,
+      fetchSpy: unknown,
+    ) => ({
+      harnesses: {
+        codon: [claude(), pi({ adopt, answer: unknownUnlessAdopted(adopted) })],
+        sentinel: [aiSdk()],
+      },
+      network: true,
+      fetch: fetchSpy as typeof fetch,
+    });
+
+    it("refreshes a missing models.dev cache before rejecting, then adopts", async () => {
+      const adopted = new Set<string>();
+      const adopt = adopter(adopted);
+      const fetchSpy = mock(async () => Response.json(body));
+      const models = await load(
+        { hank: hankOf(["deepseek/deepseek-v9-fresh"]) },
+        options(adopt, adopted, fetchSpy),
+      );
+
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      expect(adopt).toHaveBeenCalledTimes(1);
+      const model = confirmed(models.check("deepseek/deepseek-v9-fresh"));
+      expect(model.provenance?.evidence).toBe("adopted from deepseek/deepseek-v4-pro");
+      expect(model.provenance?.source).toStartWith("models.dev live ");
+      expect(model.cost).toMatchObject({ input: 0.5, output: 2 });
+      expect(fs.existsSync(cachePath())).toBe(true);
+    });
+
+    it("does not refresh a fresh cache, nor when every model is known", async () => {
+      const adopted = new Set<string>();
+      const adopt = adopter(adopted);
+      const fetchSpy = mock(async () => Response.json(body));
+      await load(
+        { hank: hankOf(["deepseek/deepseek-v9-fresh"]) },
+        options(adopt, adopted, fetchSpy),
+      );
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+      // Fresh cache: an unknown model is rejected without another download.
+      const again = await load(
+        { hank: hankOf(["deepseek/deepseek-imaginary-9"]) },
+        options(adopter(new Set()), new Set(), fetchSpy),
+      );
+      expect(failed(again.check("deepseek/deepseek-imaginary-9")).kind).toBe("unknown-model");
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+      // Stale cache, known model: nothing to retry, so no download.
+      fs.rmSync(cachePath());
+      await load({ hank: hankOf(["deepseek/deepseek-v4-pro"]) }, options(adopt, adopted, fetchSpy));
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("stays offline when online model checks are off", async () => {
+      const adopted = new Set<string>();
+      const fetchSpy = mock(async () => Response.json(body));
+      const models = await load(
+        { hank: hankOf(["deepseek/deepseek-v9-fresh"]) },
+        { ...options(adopter(adopted), adopted, fetchSpy), network: false },
+      );
+      expect(failed(models.check("deepseek/deepseek-v9-fresh")).kind).toBe("unknown-model");
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
   });
 
   it("says why an adoption failed", async () => {
