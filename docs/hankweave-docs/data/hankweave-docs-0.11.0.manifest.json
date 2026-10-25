@@ -1,9 +1,9 @@
 {
   "accepted": true,
   "broken_links": 0,
-  "bytes": 10510733,
-  "canonical_docs_url": "https://hankweave.southbridge.ai/0.10.0/files/",
-  "canonical_url_status": "verified",
+  "bytes": 2073996,
+  "canonical_docs_url": "https://hankweave.southbridge.ai/0.11.0/files/",
+  "canonical_url_status": "planned",
   "columns": [
     "id",
     "slug",
@@ -31,11 +31,11 @@
     "fixture_manifest_id",
     "source_symbols"
   ],
-  "deployed": true,
-  "local_only": false,
-  "diagrams": 0,
+  "corpus_rows": 1384,
+  "deployed": false,
+  "diagrams": 39,
   "editorial_source": {
-    "base_parquet": "ddf9709d3fc4609904e12bae0a874c422ec5537c25c4eb8b5de1aac5c529c05b",
+    "base_parquet": "aa3e9242d685f23951deb31e06321e054faa3c7b9a10e1bc9d4c18e4a30c45de",
     "example": [
       {
         "bytes": 780,
@@ -58,354 +58,354 @@
     "navigation": "068f508f5b7f565399344ce96a000561a0a0f169b5e1dd1957f6051e1b7aa1e8",
     "source_pages": [
       {
-        "bytes": 38100,
+        "bytes": 38842,
         "path": "author/designing-codons-and-handoffs.mdx",
-        "sha256": "f0842d56e1170a6fcd5f7cbee3d6fe2ca9cc6f174f26a54fd2af1dc18090a90b"
+        "sha256": "dfb18070c7249dc159b637c21a6cc556852370f3d84741422e9abd07ec74df5d"
       },
       {
-        "bytes": 21550,
+        "bytes": 22688,
         "path": "author/discover-before-you-freeze.mdx",
-        "sha256": "c40f3cdce02875a07fdad317c0f9af966cfb251d8c2ecb20d7321926447f7377"
+        "sha256": "434cf11465957a405f494b5b09f721dc6ce59d8bd4446eeae23a65cb795f9e3a"
       },
       {
-        "bytes": 20084,
+        "bytes": 21170,
         "path": "author/maturing-and-versioning.mdx",
-        "sha256": "2be26d48ab131bdfec9169e35267d4df43323b99b1e15addf229fcdc58bb1ab5"
+        "sha256": "408ef1da1fe07270c7d6695a4b5fe7ecd84aba0f1e3d34819aa236c10e2bd0a8"
       },
       {
-        "bytes": 24535,
+        "bytes": 27282,
         "path": "author/patterns/completion.mdx",
-        "sha256": "f2ac70fbc90ac6f658e3423bca12c38e4cf04dcd33de874dc0e324a15e750f84"
+        "sha256": "7c3b720885561863c37eb0d25ed0d92af69e7004d34bc879ad8cf45480b41fe8"
       },
       {
-        "bytes": 22127,
+        "bytes": 25146,
         "path": "author/patterns/composition.mdx",
-        "sha256": "36ced5db23ddb52f38dc0e13198fad842ff18785172ee582f86e84afd4ab3ace"
+        "sha256": "6d3dabaf4b1722f7a2c42854e1fb66bf465b29491bd4c529dc141791a825b844"
       },
       {
-        "bytes": 17129,
+        "bytes": 19287,
         "path": "author/patterns/context.mdx",
-        "sha256": "4c5d521ca3f764072ff42d7a099f82e0eb82973d0d7ce054411668e0deab633a"
+        "sha256": "b82fce9e46997e2c81d806f3d32f619ec90e4db6722bf92487d9e2418ceebece"
       },
       {
-        "bytes": 17881,
+        "bytes": 17897,
         "path": "author/patterns/gallery.mdx",
-        "sha256": "d330a92b98ec69a70217b023776795a8489c98554ab0b1bde692eb14f24f26cb"
+        "sha256": "730b098dc785c24229439320e5dfe7ab7a78964c87682e931ac0548bda91e9b1"
       },
       {
-        "bytes": 22679,
+        "bytes": 25057,
         "path": "author/patterns/human-judgment.mdx",
-        "sha256": "ce74d74b23f6fb4c7c18f71d669e95df165143562b171122052536dde4be91b4"
+        "sha256": "efd5937410ff96eb96705ade7781782b9ca8ee8c92ca0f182f9500b27741ca9c"
       },
       {
-        "bytes": 27798,
+        "bytes": 29188,
         "path": "author/patterns/reliability.mdx",
-        "sha256": "786e148f3f479f195c913b8bca5f66a422fda8381862d837c36d064927598d96"
+        "sha256": "bf60af271fb615bca895f9c0ed5e767ef008d502759be610569882dd77894642"
       },
       {
-        "bytes": 22659,
+        "bytes": 23480,
         "path": "author/prompts.mdx",
-        "sha256": "20de5f3131ce6d1a184ad0a1b31b1eacc2e2116de5d50b8a20b70ae9741212da"
+        "sha256": "a2bc8d3d4005d08961b617a5cc3a88d8128e46b556b04d96525e4be1c93f97ca"
       },
       {
-        "bytes": 35266,
+        "bytes": 36280,
         "path": "author/testing-and-hardening.mdx",
-        "sha256": "969c33c0a1a4eb90102ed977591c7e17415622d390ec737e2173a47c1ed1367f"
+        "sha256": "9f6b8dde825b63a8c29ccced5cb237ad26a92746767d26af68dd58a4f422ae73"
       },
       {
-        "bytes": 28001,
+        "bytes": 29636,
         "path": "concepts/budgets.mdx",
-        "sha256": "a90d75d13111ac5fd012bb488d345105dbd00ae99155c6022596df7512a7f7f2"
+        "sha256": "0a4700c8633718890e805ae0a8d883ccff7f722c40abf3e440d7c93db6ddf68a"
       },
       {
-        "bytes": 22984,
+        "bytes": 25903,
         "path": "concepts/checkpoints.mdx",
-        "sha256": "fca3d47e0e8192a5cd3ef05103d61696a157ed5d8f337063154b992d108f08e5"
+        "sha256": "c08e709ac085572f3156053a02fb69f8c00461ddd5714592873e543d3f989f88"
       },
       {
-        "bytes": 29828,
+        "bytes": 31631,
         "path": "concepts/codons.mdx",
-        "sha256": "531cb1224e725ffe6a832d85d718e211dc6debc7dd0944ac889e65eebfccbe7d"
+        "sha256": "6fa531b2cf917359194a6b08df0c26ea275a4e20f589352ce87482a5fe9fc993"
       },
       {
-        "bytes": 19145,
+        "bytes": 20986,
         "path": "concepts/hanks.mdx",
-        "sha256": "f87cb2a19548434726ced8c13fd7bcdca7b42c88cb2c13bc8f2149673246c172"
+        "sha256": "913f26bc66f4755fefc7808a7b8ffaed01bebf15cb1bee9c5af2867f6930a592"
       },
       {
-        "bytes": 21216,
+        "bytes": 23686,
         "path": "concepts/loops.mdx",
-        "sha256": "49cc49daaa5e12aad1931ca4e0de73a398ee74a561ff80c38ef9534672a7dff5"
+        "sha256": "a6160f9bc2b52133e93e09ac3bc32df7adbb946651ab778ce21bc905cc436577"
       },
       {
-        "bytes": 18239,
+        "bytes": 20808,
         "path": "concepts/rigs.mdx",
-        "sha256": "acb3873eaca413b02b0bdd0aa24876f9794fc610a6ae9868360feb94c9e8d892"
+        "sha256": "7192a4a5c58ec8ded475607c51d8f7d6c8fa0d1cc31b7c1d0eb295bc010823e0"
       },
       {
-        "bytes": 32771,
+        "bytes": 33681,
         "path": "concepts/sentinels.mdx",
-        "sha256": "c2273a4567916863848a138e9a1566cb5470f277437ce7a432f6ce9e687728e8"
+        "sha256": "555bb7685fc4962301ca389509294c97018952146bc2b3cfebf663b20b0580c4"
       },
       {
-        "bytes": 29508,
+        "bytes": 31062,
         "path": "contribute/documentation-pipeline.mdx",
-        "sha256": "0a13aa456378452bf4306631701d809906829f181a91a8bbe3c8ae477cdf0ad9"
+        "sha256": "c93cf3cc579b465be759dcc864e2c146ffe753bb9a2f87a007bfce68e54bb4d6"
       },
       {
-        "bytes": 32195,
+        "bytes": 37251,
         "path": "contribute/execution-thread.mdx",
-        "sha256": "b6e3dbd158d71e641132f44e6581ffa7aab4e41c0dc8a4ba6fd8744c41ff599a"
+        "sha256": "98a714a34846926950b5edaeb44bf363ff8498bf4f8bc06362d9105ab9e5f68a"
       },
       {
-        "bytes": 22892,
+        "bytes": 25709,
         "path": "contribute/runtime-architecture.mdx",
-        "sha256": "e04964a26d6e6061d1c674ca8c1ed29dbb5c7cd78f7d7a3e5cb76400442eb5cb"
+        "sha256": "b72d3f92006752b69b48fda08795b5afbf64dbc863d7c9e71fd6ae0294d1129a"
       },
       {
-        "bytes": 30889,
+        "bytes": 33448,
         "path": "contribute/state-machine.mdx",
-        "sha256": "13b6e18499d35d1bfab8156fe461b7cf68bdfb3203b91a1cb01f805f345e9802"
+        "sha256": "9c6dbe37db2d0f6c52929b7174dcba7378551fc6e443bd698ca0975dbc115472"
       },
       {
-        "bytes": 38871,
+        "bytes": 39553,
         "path": "examples/connector-build-test.mdx",
-        "sha256": "01625897a2b42009f57a9466c0cd8086ed487fc5d814846fd8793a80edfcc221"
+        "sha256": "df3b4a7ca86753171817876bb4071aabf299dcb4d37e8815c15b38d591e497ad"
       },
       {
-        "bytes": 73383,
+        "bytes": 76047,
         "path": "examples/docs-maintenance.mdx",
-        "sha256": "f784f3717ccc771b4d24d38b9b22f63f6f2e97ccda45d4d26b30202f1c81c51b"
+        "sha256": "ce496c450aa0350cd11e9299ae01e7ef710f8d440173b2ee59918ee39ba792f3"
       },
       {
-        "bytes": 15974,
+        "bytes": 16647,
         "path": "examples/index.mdx",
-        "sha256": "942dd225b586dc7a70b1b0b9a87e5a6f54f88608137661686a0bd4c7eeb8e219"
+        "sha256": "aa98b488f022327195054c7a2094a3d0345548726f0f2d62e3c0e46bde09cf1a"
       },
       {
-        "bytes": 32211,
+        "bytes": 35133,
         "path": "examples/minimal-single-provider.mdx",
-        "sha256": "772353a4ee7d8b28b35761b820925b276beea4509b7a62253aead7ff1d397b30"
+        "sha256": "71d13af28682d385173e8e835c48b94ed0ccf180c4fbd05df015062ab703f435"
       },
       {
-        "bytes": 19838,
+        "bytes": 21801,
         "path": "examples/plan-review-update.mdx",
-        "sha256": "e6e3b940dcfe965358dfee3e0f0edf3f4a0b64f758ad28d56ac37d4171ff4764"
+        "sha256": "c4802bda8df71a944674c24b5c2cac722974c9e677f1cbf60e8ed998a7c39362"
       },
       {
-        "bytes": 49092,
+        "bytes": 50760,
         "path": "examples/quote-template-unification.mdx",
-        "sha256": "b486a567eef128dc1215b7d90a54c3680936f384862d5dbecd452c4ce0aaab4e"
+        "sha256": "ecfbd80d13e4c8049d0235adf658d6e6fe3d8a5a16cad9bedca8249dd5863507"
       },
       {
-        "bytes": 8996,
+        "bytes": 11238,
         "path": "faq.mdx",
-        "sha256": "f570864ddc521d565ba780f67c82c0c109f1a98d760ae89c4ea577cf542c8867"
+        "sha256": "d1570cf539d0441902688b15e0d5bf9d29d764550e46ff1dc8cb6b09cf648d01"
       },
       {
-        "bytes": 13135,
+        "bytes": 17898,
         "path": "help.mdx",
-        "sha256": "ecda5a4224bbdc0c13ac3914a051db8b7c33a3fce525dbe6b147c6bac865364a"
+        "sha256": "eddf62be241e0d23d711fec8d2ddcb8261bfb57142f4f932dbae888151083b23"
       },
       {
-        "bytes": 16778,
+        "bytes": 19229,
         "path": "index.mdx",
-        "sha256": "4890d1a85f470435ad2c1662d432cbd3a8095251dd6404c3bef23a0028ee6332"
+        "sha256": "74163a38faf7e40c1e56df7c2e80e9cdc07d87892d2461b35808d25ff8476584"
       },
       {
-        "bytes": 16727,
+        "bytes": 18804,
         "path": "integrate/client-and-exported-types.mdx",
-        "sha256": "cdb17357f3d91f4aba5571c9030b24201b18f22207b7444c92437dc66a13ce0f"
+        "sha256": "4b23f0258a394e3a495b1e110b73fc87281792ebc010cef4ddc0b845eae24b07"
       },
       {
-        "bytes": 18767,
+        "bytes": 21252,
         "path": "integrate/deployment-model.mdx",
-        "sha256": "0538a8f30b6626dd3005472c7a058a29ee0ccaf0f170330dad2fcca0d6d7ca9f"
+        "sha256": "1ba057de3efb45276a4530ba8b754771e7d389a324f07a3b1bd7f775f1f2069d"
       },
       {
-        "bytes": 31633,
+        "bytes": 37118,
         "path": "integrate/event-journal.mdx",
-        "sha256": "1221a5d4388bcb2d1b7009fc9ea06fd724706321b25f3db657a9eafa11fcabee"
+        "sha256": "a404caedde39e5587e12120b0e5aba66d832d15d300e5999d3259d888a43e17c"
       },
       {
-        "bytes": 26471,
+        "bytes": 27947,
         "path": "integrate/protocol.mdx",
-        "sha256": "6a429abab35436592b37f2956425504cdd677f5c3e6cdd88f230fca8271ae0a9"
+        "sha256": "03449d0780cdd446a4d2669fa8fef642b8c4ce8ed40398522d72ff4fc91bae6c"
       },
       {
-        "bytes": 25733,
+        "bytes": 27035,
         "path": "integrate/websocket-quickstart.mdx",
-        "sha256": "29693d7504bca5183650ff6b367c5e3ebb7524c77ef4b283b5f1a9a5753ad627"
+        "sha256": "54c2a224ce359312038601957a348268ba772bc7d79ebc85c310c73349e36e47"
       },
       {
-        "bytes": 21029,
+        "bytes": 21908,
         "path": "operate/authentication-and-models.mdx",
-        "sha256": "b32b64625fe93799bb3bf0944d48d1dadde88b2f7d5044901f09f2051d221b34"
+        "sha256": "4a76d83251f6f2c24abc23d49c589ad67f158082f1d87d16262c510454c53ce1"
       },
       {
-        "bytes": 16634,
+        "bytes": 20327,
         "path": "operate/deployment.mdx",
-        "sha256": "8a4bf3c49c0319f60771398256cf39701e82cfbdc94d40770de4c73b1cc1a28e"
+        "sha256": "aa30f43b01c6312f3c621b4eb166712322d77b181c95db76dbf5c4c5c1e6cbba"
       },
       {
-        "bytes": 19658,
+        "bytes": 19730,
         "path": "operate/observability.mdx",
-        "sha256": "31685482a95fe0135e07ab6c4e5a0cd3c27ab557b849606b117ee826e679ad8d"
+        "sha256": "4665db5bb155adb1f463ee74463d6b6c4d436df4681ea55944ade07fa9610ee8"
       },
       {
-        "bytes": 45603,
+        "bytes": 54676,
         "path": "operate/observe-and-debug.mdx",
-        "sha256": "e9c522333ee20bd1ecce133dc17c5a39c32180ed7a97d50ad248c159aadf6374"
+        "sha256": "5e88b463df9dff5b8a5d3ac60289cb65ba1ce47cf558e89ef1d9d01768e0480c"
       },
       {
-        "bytes": 30416,
+        "bytes": 35973,
         "path": "operate/resume-rollback-and-retry.mdx",
-        "sha256": "7f9e8587fba382c548fa5bf3243d4db6ce8e84045dba8d7409a34831b956bda7"
+        "sha256": "57fdd4584fb5191a2df911164cda6eeb32e02f3d3d09b384ad6530aee62f9c7a"
       },
       {
-        "bytes": 36272,
+        "bytes": 40585,
         "path": "operate/runbook.mdx",
-        "sha256": "a0d454fe936f0c42fdbb18d26e5c8a8398b64294327bee77d31d4eade7ed4b53"
+        "sha256": "4e7eca73c2e42c6bdb5447c7166fc8f039f479b31d1819d7c11507520c4c00e5"
       },
       {
-        "bytes": 24106,
+        "bytes": 28235,
         "path": "operate/troubleshooting.mdx",
-        "sha256": "3b4d07649c181311601a23197395327ed23db1bb18ab8da1cf0be8b2e071e5df"
+        "sha256": "ca7e66e162b10f00c7ad0a81eb06042a4d92455ff137f2ea6c8cf57f06a4b3e2"
       },
       {
-        "bytes": 17146,
+        "bytes": 18842,
         "path": "reference/aws-bedrock.mdx",
-        "sha256": "e4bcfd5bbd206786d207c70df28ee04acc61cb1634f51f540ad56df818783a8a"
+        "sha256": "09e63113148b3bd2f065473514f5d2f0f71b823ff54df87ec5ed7bff7ec1cda3"
       },
       {
-        "bytes": 44411,
+        "bytes": 54039,
         "path": "reference/cli.mdx",
-        "sha256": "7faab09bb6536d73b56b8edaffd0c3fe3b9d53e81ef6b52dd1f9fb884abc5779"
+        "sha256": "1f81b37f204624d95b2a5ba27e1723d969db62e8b029159e86f02beb9fed7da8"
       },
       {
-        "bytes": 36708,
+        "bytes": 39129,
         "path": "reference/environment-variables.mdx",
-        "sha256": "1206e129388845aadb9a0e6a331489e8493083465a0bc50093da9ef1a473dcad"
+        "sha256": "358f44fa8191f651df2647e5ca9400118270a4963078449540bbd71cfd77b2a3"
       },
       {
-        "bytes": 20893,
+        "bytes": 24739,
         "path": "reference/errors-and-exit-codes.mdx",
-        "sha256": "82aab640ea5dac33e0ae0f9e8b2cc0a83871c8ff0f6f785f3bd07ce121671d7a"
+        "sha256": "07173571d6d186355dcb169e4c82194f4d08a3bbf0075d17c59d0d92f86c9feb"
       },
       {
-        "bytes": 22834,
+        "bytes": 22989,
         "path": "reference/events.mdx",
-        "sha256": "7b68cae114c73e2d061276b1bb6da423540fcf51d780f602037e277aa403eaa2"
+        "sha256": "3d97f267ec096a7268811abc316d72120946144e7b3ee17e2247acc92328f944"
       },
       {
-        "bytes": 20195,
+        "bytes": 25134,
         "path": "reference/execution-directory.mdx",
-        "sha256": "cdf8744f23fb606ba442edefb6ee9a2ffc075ffc7210a94f26953e437cb47a32"
+        "sha256": "3d48b61f4f90d46f5bfc92614b7334d63b4727a4ace4a657228d81e7635be92a"
       },
       {
-        "bytes": 37633,
+        "bytes": 38120,
         "path": "reference/hank-json.mdx",
-        "sha256": "cbac4124a5cc2798d3dacae79658efa7495e1cb397d6f6b0b8a3da465dbb6851"
+        "sha256": "52e7cf8a752bd995d3717639a348eebae362639ce595f995425617647fa6127d"
       },
       {
-        "bytes": 36382,
+        "bytes": 40035,
         "path": "reference/hankweave-json.mdx",
-        "sha256": "4a9658dfd4791baf7326ac5a5cfe75940efa187ed1f1a3faea8d3fc0a10a76e6"
+        "sha256": "8ea7b7e04dc8b58f97479925e07500b2f1d1d5367711937fbf9bc42d7fa7486e"
       },
       {
-        "bytes": 13447,
+        "bytes": 13739,
         "path": "reference/llm-proxy.mdx",
-        "sha256": "8a274007aa9712341bf560703dc555901a1e831dd64f13835c8051f2e99f0ed0"
+        "sha256": "8b4ae26c11eacfeb46a8fb868594471bb8ef2843e4934594467bca60a9e76b8b"
       },
       {
-        "bytes": 18470,
+        "bytes": 20174,
         "path": "reference/model-resolution.mdx",
-        "sha256": "da4786eba0f48bcd9d773c3982f6d969b6bd73b2619995118b5e117442a5ed93"
+        "sha256": "fb7aa64aa18a9719a849f4dcb2550950d47ef27b8779ec4436dfe1245cd4dd8c"
       },
       {
-        "bytes": 35217,
+        "bytes": 36627,
         "path": "reference/models-and-harnesses.mdx",
-        "sha256": "b08899799011d440c68dac21e5c9bee819a79149f0a889b298693945fbd10fdc"
+        "sha256": "f7184e8ad124275c1f97e27d2958cf56f5425a54955b7f6f5986cb0d087788e7"
       },
       {
-        "bytes": 33522,
+        "bytes": 35666,
         "path": "reference/sentinel-config.mdx",
-        "sha256": "f1bc0774f000146df788116ec3e704c4cc772306c393715a85d19c62b7b30eb2"
+        "sha256": "07875ded5eb9821df95c01fd5c67c2fd87a6cb331f74dceae84a54c6bbc06cfd"
       },
       {
-        "bytes": 45544,
+        "bytes": 49347,
         "path": "reference/state-file.mdx",
-        "sha256": "0895c421324f92cb7d1662c91762dc12c059ba4cbd2c3a9fa82a5dcf77a9539d"
+        "sha256": "a0111b3583ef984fa52c74a6e8ed606c262c5ae90fb0fe1686d4444c9a77146d"
       },
       {
-        "bytes": 30467,
+        "bytes": 31908,
         "path": "reference/telemetry.mdx",
-        "sha256": "44c8476d5de7a430827c38f23d71c20fe17b83cbd0a50dbd47ebcdedfac120d7"
+        "sha256": "9b172c5b7f8064bc664e937c5487c83096a980535a8577bd8e990c388a94b8df"
       },
       {
-        "bytes": 18642,
+        "bytes": 21609,
         "path": "start/first-run.mdx",
-        "sha256": "ccc270b7ba51a7079cd9eb4617153a76631c619c489d1ab8ce1311a9099e5a99"
+        "sha256": "0f904f0ef7ed8425e41c5aec2aee3558b4060b76d0721d444ac42c6b34c5e6fd"
       },
       {
-        "bytes": 13859,
+        "bytes": 16922,
         "path": "start/how-a-run-works.mdx",
-        "sha256": "4de77d0b283b9ebea6e838e89c2c339a904216c947fb93403f2dec2380be6d52"
+        "sha256": "4aa19501395fe45ac6ac2b10fe80cd13fd49d92f81c49b141c71a3c0cb5787ea"
       },
       {
-        "bytes": 10483,
+        "bytes": 10515,
         "path": "start/is-it-right-for-you.mdx",
-        "sha256": "478a204fd73890d9fa1ac6b42606c1bcd8e1805ec4b323c9ca7c0737e00c129e"
+        "sha256": "84a3d7e8fdefe65646b938c1a0dfba1c32f5b930eb66d820c3cbd62b22881275"
       },
       {
-        "bytes": 13801,
+        "bytes": 14676,
         "path": "start/quickstart.mdx",
-        "sha256": "4cf247607168bb52358410965b49ad9a095c0d5fa047b0fdf1a848100679504d"
+        "sha256": "3560de9a683c5d8e6c35854cd4f344af69bed07b287c10382c11c51f632edc86"
       },
       {
-        "bytes": 17538,
+        "bytes": 25044,
         "path": "start/upgrading.mdx",
-        "sha256": "f72ce6c9c2242ef1384a90de56f0c8a68d8100f25b9d742c7a811f1a60756650"
+        "sha256": "9820451b9456cb4b4cf93fd9fcfa86af4db84ce8b6b51a47eef3555869ba466d"
       },
       {
-        "bytes": 8940,
+        "bytes": 9482,
         "path": "start/why-hankweave.mdx",
-        "sha256": "236c6b5a6d713298a3a744823d9cf58211f76c826648876c7bfb9d81eb3623dc"
+        "sha256": "c108e20d0afae26623112db52a38f892d34780d023f466a960f93b6f38156784"
       },
       {
-        "bytes": 25473,
+        "bytes": 26457,
         "path": "tutorial/0-tour.mdx",
-        "sha256": "047865eb3642f22b7d6d06d4584a58b591935e51fc4f0336da8da917ebdf3df7"
+        "sha256": "0c1a066b906651869ab1199f197b2e3d6743bc29baf2c29f69a8a0061360609d"
       },
       {
-        "bytes": 27272,
+        "bytes": 28208,
         "path": "tutorial/1-baseline.mdx",
-        "sha256": "11bd62361838151f42aaa4fb3e1783ceea7efdffa747461acd551e4094170299"
+        "sha256": "13ecd2375da720cefc0bd0607ca29fb4c344486928cb18bdc1cf73082f1bc73d"
       },
       {
-        "bytes": 22447,
+        "bytes": 22835,
         "path": "tutorial/2-determinism.mdx",
-        "sha256": "fd752cae0322451d0c2420a8971a779c807532bf368543163eaa67a6bdcd2fbd"
+        "sha256": "8fa00d96824d21c0f857af9806d599feadb67efa9675c3d9902932e210088b8b"
       },
       {
-        "bytes": 32653,
+        "bytes": 33817,
         "path": "tutorial/3-validate-and-repair.mdx",
-        "sha256": "8ddb917860a106f3361bfae95964dc12a13ceb606de49161f391398094830e89"
+        "sha256": "b512a579706b032dfec44db4aedc46a8f9174ac9c0bc81e08b97ba728e3a5308"
       },
       {
-        "bytes": 36768,
+        "bytes": 38453,
         "path": "tutorial/4-observe-and-budget.mdx",
-        "sha256": "2c0045f4f74beda6c146c913a817e7cf31f790a765fdb210cb17755853451ebb"
+        "sha256": "9326042ba1c12071ffb71d29f4bffed557667c6d39a58eb15e93859bfa2919c0"
       },
       {
-        "bytes": 32466,
+        "bytes": 33735,
         "path": "tutorial/5-break-resume-inspect.mdx",
-        "sha256": "5a378b2cf79dc174846a90c6e4022bf99faffebafa5cb79605641aab8ea5e1bf"
+        "sha256": "48e1900f7c3858a4064ae80b573940c1f1c486966b5e7dd7e9984b1d78ec7640"
       },
       {
-        "bytes": 35672,
+        "bytes": 36333,
         "path": "tutorial/fixtures.mdx",
-        "sha256": "7e8ef2dd51485a2e640dfa90be2f19ad43d43b9ecf301cab6e6038b431a4a38d"
+        "sha256": "e3a314a9a290963b90f7367bfe57bea0f00045aa6db478fdce8b0005794c3c00"
       }
     ]
   },
@@ -416,15 +416,15 @@
       "unresolved": 94
     },
     "fixture_grouping": "Fixture grouping is navigation by manifest/path, not proof that every member was executed. Read the manifest's scope and limits.",
-    "fixture_manifests": 35,
-    "fixtures_without_manifest": 12,
+    "fixture_manifests": 36,
+    "fixtures_without_manifest": 38,
     "format": 1,
     "links_by_kind": {
-      "fixture-manifest": 1002,
-      "fixture-member": 551,
-      "link": 1935,
-      "source-citation": 4277,
-      "source-import": 1136
+      "fixture-manifest": 1050,
+      "fixture-member": 563,
+      "link": 2102,
+      "source-citation": 4949,
+      "source-import": 1262
     },
     "unresolved": [
       {
@@ -481,7 +481,7 @@
         "label": "fixtures/verify.py",
         "line_end": null,
         "line_start": null,
-        "occurrences": 4,
+        "occurrences": 3,
         "page": "author/designing-codons-and-handoffs",
         "reason": "Published fixture exists but has no scope manifest",
         "source_anchor": "inspect-the-boundaries-on-disk",
@@ -490,7 +490,7 @@
       {
         "candidates": [],
         "kind": "fixture-reference",
-        "label": "/fixtures/0.10.0/files/anchor-hank/design-notes.md",
+        "label": "/fixtures/0.11.0/files/anchor-hank/design-notes.md",
         "line_end": null,
         "line_start": null,
         "occurrences": 1,
@@ -538,7 +538,7 @@
       {
         "candidates": [],
         "kind": "fixture-reference",
-        "label": "/fixtures/0.10.0/files/anchor-hank/design-notes.md",
+        "label": "/fixtures/0.11.0/files/anchor-hank/design-notes.md",
         "line_end": null,
         "line_start": null,
         "occurrences": 1,
@@ -769,6 +769,18 @@
         "label": "fixtures/verify.py",
         "line_end": null,
         "line_start": null,
+        "occurrences": 3,
+        "page": "author/patterns/gallery",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "run-checked-examples",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/verify.py",
+        "line_end": null,
+        "line_start": null,
         "occurrences": 4,
         "page": "author/patterns/gallery",
         "reason": "Published fixture exists but has no scope manifest",
@@ -778,7 +790,7 @@
       {
         "candidates": [],
         "kind": "fixture-reference",
-        "label": "/fixtures/0.10.0/files/anchor-hank/README.md",
+        "label": "/fixtures/0.11.0/files/anchor-hank/README.md",
         "line_end": null,
         "line_start": null,
         "occurrences": 1,
@@ -790,7 +802,7 @@
       {
         "candidates": [],
         "kind": "fixture-reference",
-        "label": "/fixtures/0.10.0/files/chapters/PROGRESSION.md",
+        "label": "/fixtures/0.11.0/files/chapters/PROGRESSION.md",
         "line_end": null,
         "line_start": null,
         "occurrences": 1,
@@ -802,7 +814,7 @@
       {
         "candidates": [],
         "kind": "fixture-reference",
-        "label": "/fixtures/0.10.0/files/chapters/ch1/expected/CAPTURE.md",
+        "label": "/fixtures/0.11.0/files/chapters/ch1/expected/CAPTURE.md",
         "line_end": null,
         "line_start": null,
         "occurrences": 1,
@@ -814,7 +826,7 @@
       {
         "candidates": [],
         "kind": "fixture-reference",
-        "label": "/fixtures/0.10.0/files/chapters/ch2/expected/CAPTURE.md",
+        "label": "/fixtures/0.11.0/files/chapters/ch2/expected/CAPTURE.md",
         "line_end": null,
         "line_start": null,
         "occurrences": 1,
@@ -826,7 +838,7 @@
       {
         "candidates": [],
         "kind": "fixture-reference",
-        "label": "/fixtures/0.10.0/files/chapters/ch3/expected/CAPTURE.md",
+        "label": "/fixtures/0.11.0/files/chapters/ch3/expected/CAPTURE.md",
         "line_end": null,
         "line_start": null,
         "occurrences": 1,
@@ -838,7 +850,7 @@
       {
         "candidates": [],
         "kind": "fixture-reference",
-        "label": "/fixtures/0.10.0/files/chapters/ch4/expected/CAPTURE.md",
+        "label": "/fixtures/0.11.0/files/chapters/ch4/expected/CAPTURE.md",
         "line_end": null,
         "line_start": null,
         "occurrences": 1,
@@ -850,7 +862,7 @@
       {
         "candidates": [],
         "kind": "fixture-reference",
-        "label": "/fixtures/0.10.0/files/chapters/ch5/expected/CAPTURE.md",
+        "label": "/fixtures/0.11.0/files/chapters/ch5/expected/CAPTURE.md",
         "line_end": null,
         "line_start": null,
         "occurrences": 1,
@@ -862,7 +874,7 @@
       {
         "candidates": [],
         "kind": "fixture-reference",
-        "label": "/fixtures/0.10.0/files/connector-build-test/README.md",
+        "label": "/fixtures/0.11.0/files/connector-build-test/README.md",
         "line_end": null,
         "line_start": null,
         "occurrences": 1,
@@ -874,7 +886,7 @@
       {
         "candidates": [],
         "kind": "fixture-reference",
-        "label": "/fixtures/0.10.0/files/minimal-single-provider/README.md",
+        "label": "/fixtures/0.11.0/files/minimal-single-provider/README.md",
         "line_end": null,
         "line_start": null,
         "occurrences": 1,
@@ -886,7 +898,7 @@
       {
         "candidates": [],
         "kind": "fixture-reference",
-        "label": "/fixtures/0.10.0/files/plan-review-update/README.md",
+        "label": "/fixtures/0.11.0/files/plan-review-update/README.md",
         "line_end": null,
         "line_start": null,
         "occurrences": 1,
@@ -898,7 +910,19 @@
       {
         "candidates": [],
         "kind": "fixture-reference",
-        "label": "/fixtures/0.10.0/hankweave-fixtures-0.10.0.tar.gz",
+        "label": "/fixtures/0.11.0/hankweave-fixtures-0.11.0.tar.gz",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 2,
+        "page": "author/patterns/gallery",
+        "reason": "No published fixture row matches this reference",
+        "source_anchor": "run-checked-examples",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-reference",
+        "label": "/fixtures/0.11.0/manifest.json",
         "line_end": null,
         "line_start": null,
         "occurrences": 2,
@@ -1186,7 +1210,7 @@
       {
         "candidates": [],
         "kind": "fixture-reference",
-        "label": "/fixtures/0.10.0/files/connector-build-test/hank.json",
+        "label": "/fixtures/0.11.0/files/connector-build-test/hank.json",
         "line_end": null,
         "line_start": null,
         "occurrences": 1,
@@ -1198,7 +1222,7 @@
       {
         "candidates": [],
         "kind": "fixture-reference",
-        "label": "/fixtures/0.10.0/hankweave-fixtures-0.10.0.tar.gz",
+        "label": "/fixtures/0.11.0/hankweave-fixtures-0.11.0.tar.gz",
         "line_end": null,
         "line_start": null,
         "occurrences": 1,
@@ -1282,6 +1306,18 @@
       {
         "candidates": [],
         "kind": "fixture-manifest",
+        "label": "fixtures/verify.py",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 3,
+        "page": "examples/docs-maintenance",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "use-the-anchor-hank-as-your-model",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
         "label": "fixtures/chapters/PROGRESSION.md",
         "line_end": null,
         "line_start": null,
@@ -1342,7 +1378,7 @@
       {
         "candidates": [],
         "kind": "fixture-reference",
-        "label": "/fixtures/0.10.0/hankweave-fixtures-0.10.0.tar.gz",
+        "label": "/fixtures/0.11.0/hankweave-fixtures-0.11.0.tar.gz",
         "line_end": null,
         "line_start": null,
         "occurrences": 1,
@@ -1377,23 +1413,23 @@
       },
       {
         "candidates": [],
-        "kind": "fixture-manifest",
-        "label": "fixtures/chapters/PROGRESSION.md",
+        "kind": "fixture-reference",
+        "label": "/fixtures/0.11.0/hankweave-fixtures-0.11.0.tar.gz",
         "line_end": null,
         "line_start": null,
         "occurrences": 1,
         "page": "examples/plan-review-update",
-        "reason": "Published fixture exists but has no scope manifest",
+        "reason": "No published fixture row matches this reference",
         "source_anchor": "run-from-the-fixture-directory",
         "status": "unresolved"
       },
       {
         "candidates": [],
         "kind": "fixture-reference",
-        "label": "/fixtures/0.10.0/hankweave-fixtures-0.10.0.tar.gz",
+        "label": "/fixtures/0.11.0/manifest.json",
         "line_end": null,
         "line_start": null,
-        "occurrences": 1,
+        "occurrences": 2,
         "page": "examples/plan-review-update",
         "reason": "No published fixture row matches this reference",
         "source_anchor": "run-from-the-fixture-directory",
@@ -1462,7 +1498,7 @@
       {
         "candidates": [],
         "kind": "fixture-reference",
-        "label": "/fixtures/0.10.0/hankweave-fixtures-0.10.0.tar.gz",
+        "label": "/fixtures/0.11.0/hankweave-fixtures-0.11.0.tar.gz",
         "line_end": null,
         "line_start": null,
         "occurrences": 1,
@@ -1678,7 +1714,7 @@
       {
         "candidates": [],
         "kind": "fixture-reference",
-        "label": "/fixtures/0.10.0/files/websocket-quickstart/monitor.ts",
+        "label": "/fixtures/0.11.0/files/websocket-quickstart/monitor.ts",
         "line_end": null,
         "line_start": null,
         "occurrences": 1,
@@ -1690,7 +1726,7 @@
       {
         "candidates": [],
         "kind": "fixture-reference",
-        "label": "/fixtures/0.10.0/files/websocket-quickstart/refusal-probe.ts",
+        "label": "/fixtures/0.11.0/files/websocket-quickstart/refusal-probe.ts",
         "line_end": null,
         "line_start": null,
         "occurrences": 1,
@@ -1702,7 +1738,7 @@
       {
         "candidates": [],
         "kind": "fixture-reference",
-        "label": "/fixtures/0.10.0/hankweave-fixtures-0.10.0.tar.gz",
+        "label": "/fixtures/0.11.0/hankweave-fixtures-0.11.0.tar.gz",
         "line_end": null,
         "line_start": null,
         "occurrences": 1,
@@ -1762,7 +1798,7 @@
       {
         "candidates": [],
         "kind": "fixture-reference",
-        "label": "/fixtures/0.10.0/hankweave-fixtures-0.10.0.tar.gz",
+        "label": "/fixtures/0.11.0/hankweave-fixtures-0.11.0.tar.gz",
         "line_end": null,
         "line_start": null,
         "occurrences": 1,
@@ -2124,19 +2160,7 @@
       {
         "candidates": [],
         "kind": "fixture-reference",
-        "label": "/fixtures/0.10.0/files/minimal-single-provider/expected/fail-no-key.txt",
-        "line_end": null,
-        "line_start": null,
-        "occurrences": 1,
-        "page": "start/quickstart",
-        "reason": "No published fixture row matches this reference",
-        "source_anchor": "break-it-on-purpose",
-        "status": "unresolved"
-      },
-      {
-        "candidates": [],
-        "kind": "fixture-reference",
-        "label": "/fixtures/0.10.0/files/minimal-single-provider/expected/final-events.txt",
+        "label": "/fixtures/0.11.0/files/minimal-single-provider/expected/MANIFEST.md",
         "line_end": null,
         "line_start": null,
         "occurrences": 1,
@@ -2148,7 +2172,31 @@
       {
         "candidates": [],
         "kind": "fixture-reference",
-        "label": "/fixtures/0.10.0/files/minimal-single-provider/expected/validate-output.txt",
+        "label": "/fixtures/0.11.0/files/minimal-single-provider/expected/fail-no-key.txt",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "start/quickstart",
+        "reason": "No published fixture row matches this reference",
+        "source_anchor": "break-it-on-purpose",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-reference",
+        "label": "/fixtures/0.11.0/files/minimal-single-provider/expected/final-events.txt",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "start/quickstart",
+        "reason": "No published fixture row matches this reference",
+        "source_anchor": "run-it-and-inspect-the-result",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-reference",
+        "label": "/fixtures/0.11.0/files/minimal-single-provider/expected/validate-output.txt",
         "line_end": null,
         "line_start": null,
         "occurrences": 1,
@@ -2160,7 +2208,7 @@
       {
         "candidates": [],
         "kind": "fixture-reference",
-        "label": "/fixtures/0.10.0/hankweave-fixtures-0.10.0.tar.gz",
+        "label": "/fixtures/0.11.0/hankweave-fixtures-0.11.0.tar.gz",
         "line_end": null,
         "line_start": null,
         "occurrences": 1,
@@ -2244,6 +2292,18 @@
         "occurrences": 1,
         "page": "tutorial/0-tour",
         "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "protect-the-data-boundary",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/chapters/PROGRESSION.md",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/0-tour",
+        "reason": "Published fixture exists but has no scope manifest",
         "source_anchor": "start-chapter-1-with-a-clean-fixture",
         "status": "unresolved"
       },
@@ -2268,13 +2328,25 @@
         "occurrences": 1,
         "page": "tutorial/0-tour",
         "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "find-the-hazards-before-they-surprise-us",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/verify.py",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/0-tour",
+        "reason": "Published fixture exists but has no scope manifest",
         "source_anchor": "protect-the-data-boundary",
         "status": "unresolved"
       },
       {
         "candidates": [],
         "kind": "fixture-reference",
-        "label": "/fixtures/0.10.0/files/chapters/PROGRESSION.md",
+        "label": "/fixtures/0.11.0/files/chapters/PROGRESSION.md",
         "line_end": null,
         "line_start": null,
         "occurrences": 1,
@@ -2286,7 +2358,7 @@
       {
         "candidates": [],
         "kind": "fixture-reference",
-        "label": "/fixtures/0.10.0/hankweave-fixtures-0.10.0.tar.gz",
+        "label": "/fixtures/0.11.0/hankweave-fixtures-0.11.0.tar.gz",
         "line_end": null,
         "line_start": null,
         "occurrences": 1,
@@ -2370,18 +2442,6 @@
         "occurrences": 1,
         "page": "tutorial/1-baseline",
         "reason": "Published fixture exists but has no scope manifest",
-        "source_anchor": "run-the-validated-hank",
-        "status": "unresolved"
-      },
-      {
-        "candidates": [],
-        "kind": "fixture-manifest",
-        "label": "fixtures/verify.py",
-        "line_end": null,
-        "line_start": null,
-        "occurrences": 1,
-        "page": "tutorial/1-baseline",
-        "reason": "Published fixture exists but has no scope manifest",
         "source_anchor": "check-it-did-it-work",
         "status": "unresolved"
       },
@@ -2400,7 +2460,7 @@
       {
         "candidates": [],
         "kind": "fixture-reference",
-        "label": "/fixtures/0.10.0/hankweave-fixtures-0.10.0.tar.gz",
+        "label": "/fixtures/0.11.0/hankweave-fixtures-0.11.0.tar.gz",
         "line_end": null,
         "line_start": null,
         "occurrences": 1,
@@ -2514,7 +2574,7 @@
       {
         "candidates": [],
         "kind": "fixture-reference",
-        "label": "/fixtures/0.10.0/hankweave-fixtures-0.10.0.tar.gz",
+        "label": "/fixtures/0.11.0/hankweave-fixtures-0.11.0.tar.gz",
         "line_end": null,
         "line_start": null,
         "occurrences": 1,
@@ -2586,7 +2646,31 @@
         "occurrences": 1,
         "page": "tutorial/3-validate-and-repair",
         "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "where-we-left-off-and-what-were-adding",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/verify.py",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/3-validate-and-repair",
+        "reason": "Published fixture exists but has no scope manifest",
         "source_anchor": "did-we-get-it-right--the-check-it",
+        "status": "unresolved"
+      },
+      {
+        "candidates": [],
+        "kind": "fixture-manifest",
+        "label": "fixtures/verify.py",
+        "line_end": null,
+        "line_start": null,
+        "occurrences": 1,
+        "page": "tutorial/3-validate-and-repair",
+        "reason": "Published fixture exists but has no scope manifest",
+        "source_anchor": "what-the-full-anchor-teaches-beyond-three-suppliers",
         "status": "unresolved"
       },
       {
@@ -2604,7 +2688,7 @@
       {
         "candidates": [],
         "kind": "fixture-reference",
-        "label": "/fixtures/0.10.0/hankweave-fixtures-0.10.0.tar.gz",
+        "label": "/fixtures/0.11.0/hankweave-fixtures-0.11.0.tar.gz",
         "line_end": null,
         "line_start": null,
         "occurrences": 1,
@@ -2670,7 +2754,7 @@
       {
         "candidates": [],
         "kind": "fixture-reference",
-        "label": "/fixtures/0.10.0/hankweave-fixtures-0.10.0.tar.gz",
+        "label": "/fixtures/0.11.0/hankweave-fixtures-0.11.0.tar.gz",
         "line_end": null,
         "line_start": null,
         "occurrences": 1,
@@ -2772,7 +2856,7 @@
       {
         "candidates": [],
         "kind": "fixture-reference",
-        "label": "/fixtures/0.10.0/hankweave-fixtures-0.10.0.tar.gz",
+        "label": "/fixtures/0.11.0/hankweave-fixtures-0.11.0.tar.gz",
         "line_end": null,
         "line_start": null,
         "occurrences": 1,
@@ -2809,18 +2893,6 @@
         "page": "tutorial/fixtures",
         "reason": "No unique published row for declared label",
         "source_anchor": null,
-        "status": "unresolved"
-      },
-      {
-        "candidates": [],
-        "kind": "fixture-manifest",
-        "label": "fixtures/chapters/PROGRESSION.md",
-        "line_end": null,
-        "line_start": null,
-        "occurrences": 1,
-        "page": "tutorial/fixtures",
-        "reason": "Published fixture exists but has no scope manifest",
-        "source_anchor": "corpus-files",
         "status": "unresolved"
       },
       {
@@ -2874,7 +2946,7 @@
       {
         "candidates": [],
         "kind": "fixture-reference",
-        "label": "/fixtures/0.10.0/hankweave-fixtures-0.10.0.tar.gz",
+        "label": "/fixtures/0.11.0/hankweave-fixtures-0.11.0.tar.gz",
         "line_end": null,
         "line_start": null,
         "occurrences": 2,
@@ -3113,8 +3185,8 @@
       }
     ]
   },
-  "file": "hankweave-source-0.10.0.parquet",
-  "fixture_manifest": "/fixtures/0.10.0/manifest.json",
+  "file": "hankweave-docs-0.11.0.parquet",
+  "fixture_manifest": "/fixtures/0.11.0/manifest.json",
   "format": 3,
   "graph_contract": {
     "deps": {
@@ -3149,29 +3221,39 @@
       "source_anchor": "Rendered section anchor on the citing page; null when unavailable"
     }
   },
-  "links": 1136,
+  "links": 8664,
   "publication_inputs": {
-    "fixture_digest": "0d5044234d03c5fca7f73d682ed15925c586130b39ac264a50f58882ce0b1aaf",
-    "generated_digest": "b1e3f81b1cd972f97bc2ad1a5402eca07a9ff3d33aedb310cf8585b793763133",
-    "lock_digest": "10b51638226c229c40f023f71f3802ceb491ea01c269220b52e9107e2522bd01",
-    "publication_controls_digest": "ab5a84a54299b06cf4504a3418692f0748f68e0ebda33477152c41569c07e73b",
-    "source_digest": "42de96683854e8702f47c725204d91c54eb2a33f5f11a70b656f091c367e6ef3"
+    "fixture_digest": "3f551502149b64f0d86402855fd98d14dc5ab122b9413927c1db3ce5cfd5bf25",
+    "generated_digest": "f5ac206b805ec99e4f36a36b07213a4c95b2a91c79858e57d4a851a996fac6ad",
+    "lock_digest": "5a258deec4b0f4a799b611def254be76a2be9e4cd8443bbf729e55aade132c65",
+    "publication_controls_digest": "95632e55ea531c17671d854e267675f3a5f6be03ea96aac5688528c7b0fc3cb7",
+    "source_digest": "71ecc6161f34054c9e91e44dbfbce2cc60715aaa6b5d6d1731f968c3aef3e41d"
   },
   "queries": {
-    "docs": "SELECT * FROM read_parquet('hankweave-docs-0.10.0.parquet') WHERE ptype NOT IN ('source','fixture')",
-    "fixture": "SELECT * FROM read_parquet('hankweave-docs-0.10.0.parquet') WHERE ptype='fixture'",
-    "source": "SELECT * FROM read_parquet('hankweave-source-0.10.0.parquet') WHERE ptype='source'"
+    "docs": "SELECT * FROM read_parquet('hankweave-docs-0.11.0.parquet') WHERE ptype NOT IN ('source','fixture')",
+    "fixture": "SELECT * FROM read_parquet('hankweave-docs-0.11.0.parquet') WHERE ptype='fixture'",
+    "source": "SELECT * FROM read_parquet('hankweave-source-0.11.0.parquet') WHERE ptype='source'"
   },
-  "role": "source",
-  "rows": 693,
+  "role": "docs",
+  "rows": 662,
   "rows_by_ptype": {
-    "source": 693
+    "authored": 54,
+    "fixture": 592,
+    "generated": 16
   },
-  "sections": 18541,
-  "set_digest": "a81a3ff264d0443f9c0700d7e4038da6e5e004abfcb3dd41ecbcc5c5221e6bb9",
+  "sections": 1353,
+  "set_digest": "63856798e88096dcb750bf5f2e09285bfaa9b6b67528f76ae4a7bfa921ac90db",
   "set_digest_format": "astra.editorial-projection.v1",
-  "sha256": "c2324a45630e3c1c52ec3b7a5b931373379e6b0c1615de4610ebb169f5beae76",
-  "source_commit": "d0f0a86bcf4528f23ffa687b9c8964c15fe7cb88",
+  "sha256": "76342767092098043f0a088005af39ae11d5e721429b7e45ed766f892bca46fc",
+  "source_commit": "8216cf3fb2984223cd7175c6d8ae7ead0dec12c0",
+  "source_pack": {
+    "bytes": 10591539,
+    "file": "hankweave-source-0.11.0.parquet",
+    "rows": 722,
+    "sha256": "3b32d017f57e552de574171008e94a4f2d381cb1d7f053545fc8dd12832e2777",
+    "source_commit": "8216cf3fb2984223cd7175c6d8ae7ead0dec12c0",
+    "version": "0.11.0"
+  },
   "source_symbols_contract": {
     "compatibility": "Additive format-3 field; absent in older files. Original sections and citation bounds are unchanged",
     "default": [],
@@ -3206,5 +3288,5 @@
     "signature": "Source header with whitespace collapsed, capped at 400 characters including any truncation marker"
   },
   "status": "accepted",
-  "version": "0.10.0"
+  "version": "0.11.0"
 }
