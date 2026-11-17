@@ -19,7 +19,7 @@ const NOTICE_TEXT = `
 │  improve the tool. No personal information, file contents,      │
 │  or prompts are collected.                                      │
 │                                                                 │
-│  Learn more: https://docs.hankweave.dev/reference/telemetry     │
+│  Learn more: https://hankweave.com/reference/telemetry          │
 │  Opt out:    export HANKWEAVE_TELEMETRY=0                       │
 │                                                                 │
 │  This notice won't be shown again.                              │

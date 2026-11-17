@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://unpkg.com/hankweave@latest/schemas/hank.schema.json",
   "title": "Hankweave Hank File",
-  "description": "Schema for hank.json - the main workflow configuration file for Hankweave. See https://hankweave.dev/reference/configuration for documentation.",
+  "description": "Schema for hank.json - the main workflow configuration file for Hankweave. See https://hankweave.com/reference/hank-json for documentation.",
   "$ref": "#/definitions/HankweaveHankFile",
   "definitions": {
     "HankweaveHankFile": {

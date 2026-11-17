@@ -1,4 +1,4 @@
-## [0.13.2] - 2026-10-23
+## [0.13.4] - 2026-11-17
 
 ### Added
 - 
@@ -7,4 +7,16 @@
 - 
 
 ### Fixed
-- **A model newer than the cached models.dev catalog was rejected until some other run refreshed the cache** — models.dev was only refreshed in the background, which `--validate` never starts and which a run that fails validation exits before finishing, so on a fresh machine (or a cache older than the model) a new model failed every time. When a harness does not know a model and the models.dev cache is missing or more than six hours old, startup now refreshes models.dev once (bounded) and checks that model again. `noOnlineModelChecks` still turns this off.
+- 
+
+## [0.13.3] - 2026-11-17
+
+### Added
+- 
+
+### Changed
+- 
+
+### Fixed
+- **Documentation links pointed at an unregistered domain** — the JSON schema descriptions and the first-run telemetry notice linked to `hankweave.dev` and `docs.hankweave.dev`, which do not resolve and are not Southbridge's. They now link to `hankweave.com`, which redirects to the documentation site.
+- **The `hank.json` schema linked to the `hankweave.json` reference** — its description pointed at `/reference/configuration`, which the docs site redirects to the `hankweave.json` page. It now links to `/reference/hank-json`.

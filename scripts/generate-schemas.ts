@@ -53,7 +53,7 @@ const schemas: SchemaConfig[] = [
     outputFile: "hank.schema.json",
     title: "Hankweave Hank File",
     description:
-      "Schema for hank.json - the main workflow configuration file for Hankweave. See https://hankweave.dev/reference/configuration for documentation.",
+      "Schema for hank.json - the main workflow configuration file for Hankweave. See https://hankweave.com/reference/hank-json for documentation.",
     // hank.schema.json already has $schema via hankFileAuthoringSchema.
     injectSchemaProp: false,
   },
@@ -62,7 +62,7 @@ const schemas: SchemaConfig[] = [
     outputFile: "hankweave.schema.json",
     title: "Hankweave Runtime Configuration",
     description:
-      "Schema for hankweave.json - runtime settings for the Hankweave server. See https://hankweave.dev/reference/configuration for documentation.",
+      "Schema for hankweave.json - runtime settings for the Hankweave server. See https://hankweave.com/reference/configuration for documentation.",
     injectSchemaProp: true,
   },
   {
@@ -70,7 +70,7 @@ const schemas: SchemaConfig[] = [
     outputFile: "sentinel.schema.json",
     title: "Hankweave Sentinel Configuration",
     description:
-      "Schema for sentinel configuration files - parallel observation agents. Note: Some runtime validations cannot be expressed in JSON Schema. See https://hankweave.dev/reference/sentinel-config for documentation.",
+      "Schema for sentinel configuration files - parallel observation agents. Note: Some runtime validations cannot be expressed in JSON Schema. See https://hankweave.com/reference/sentinel-config for documentation.",
     injectSchemaProp: true,
   },
   {
@@ -91,7 +91,7 @@ async function generateSchemas() {
     fs.mkdirSync(SCHEMA_DIR, { recursive: true });
   }
 
-  // Check if docs directory exists (optional - only used if hosting schemas on hankweave.dev)
+  // Check if docs directory exists (optional - only used if hosting schemas on hankweave.com)
   const docsAvailable = fs.existsSync(path.dirname(DOCS_SCHEMA_DIR));
   if (docsAvailable && !fs.existsSync(DOCS_SCHEMA_DIR)) {
     fs.mkdirSync(DOCS_SCHEMA_DIR, { recursive: true });

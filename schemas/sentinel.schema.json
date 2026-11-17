@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://unpkg.com/hankweave@latest/schemas/sentinel.schema.json",
   "title": "Hankweave Sentinel Configuration",
-  "description": "Schema for sentinel configuration files - parallel observation agents. Note: Some runtime validations cannot be expressed in JSON Schema. See https://hankweave.dev/reference/sentinel-config for documentation.",
+  "description": "Schema for sentinel configuration files - parallel observation agents. Note: Some runtime validations cannot be expressed in JSON Schema. See https://hankweave.com/reference/sentinel-config for documentation.",
   "$ref": "#/definitions/HankweaveSentinelConfiguration",
   "definitions": {
     "HankweaveSentinelConfiguration": {
